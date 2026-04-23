@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production*
+
+# Build
+dist/
+build/
+.next/
+out/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Testing
+/coverage
+/test-results/
+/playwright-report/
+/blob-report/
+
+# Cloudflare
+.wrangler/
+
+# Vercel
+.vercel
+
+# Workflow artifacts
+.code-review-evidence.md
+.dw-state.json
+.debug-report.md
+.verification-evidence.md
+.auto-resume.md
+
+# Discovery
+research/*.md
+discovery-output.log
+
+# IDE
+.idea/
+.vscode/
+
+# Worktrees (parallel development)
+.trees/
+
+# Claude session artifacts
+.claude/session-changes.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LSP local overrides
+lsp-config.local.json
