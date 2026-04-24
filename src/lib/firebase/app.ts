@@ -1,4 +1,9 @@
-import { initializeApp, type FirebaseApp } from 'firebase/app';
+import {
+  initializeApp,
+  getApp,
+  getApps,
+  type FirebaseApp,
+} from 'firebase/app';
 
 // Firebase app boundary. Single source of truth for `initializeApp`.
 // Full Firestore + Auth wiring (persistentLocalCache, persistentMultipleTabManager,
@@ -48,7 +53,12 @@ export function getFirebaseApp(): FirebaseApp | null {
   if (cachedApp) return cachedApp;
   const config = readConfig();
   if (!config) return null;
-  cachedApp = initializeApp(config);
+  // HMR-safe: under Vite HMR this module can be re-evaluated, which resets
+  // `cachedApp` to null. Calling `initializeApp` again on the default app
+  // throws `FirebaseError: app/duplicate-app`. Check the Firebase SDK's own
+  // registry (survives module reload) and reuse the existing default app
+  // when present.
+  cachedApp = getApps().length > 0 ? getApp() : initializeApp(config);
   return cachedApp;
 }
 
