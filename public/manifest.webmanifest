@@ -1,0 +1,11 @@
+{
+  "name": "Anwarallys Fabric Inventory",
+  "short_name": "Fabric Inventory",
+  "description": "Fabric-roll inventory for Anwarallys. One roll = one item. Scan QR to adjust stock.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#1f2937",
+  "icons": []
+}
