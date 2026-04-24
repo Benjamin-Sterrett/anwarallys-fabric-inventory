@@ -9,8 +9,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "preview": "vite preview",
-    "test": "echo 'No tests yet — scaffold only' && exit 0"
+    "preview": "vite preview"
   },
   "dependencies": {
     "firebase": "^10.14.0",
