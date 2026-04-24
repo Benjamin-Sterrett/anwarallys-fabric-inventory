@@ -45,7 +45,8 @@ pnpm dev                      # http://localhost:5173
 - `pnpm build` — type-check + production build to `dist/`
 - `pnpm typecheck` — strict TS check only
 - `pnpm preview` — serve the built `dist/` locally
-- `pnpm test` — placeholder (no test framework yet; lands in a later ticket)
+
+Tests land with PRJ-779+ (Vitest). No test runner is installed yet.
 
 ## Environment variables
 
