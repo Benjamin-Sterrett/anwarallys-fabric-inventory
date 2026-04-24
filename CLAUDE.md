@@ -8,11 +8,11 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - `linear issue start PRJ-##` — start working on an issue
 
 ## Current Status
-- **Phase:** Wave 0 — Intake / replacement plan captured
-- **Last:** Project scaffolded (2026-04-23)
-- **Done:** Directory, CLAUDE.md, Linear project + Wave 0-6 tickets, GitHub repo, Uplink topic
-- **Next:** Wave 1 — scaffold the clean codebase + define Firestore schema
-- **Handoff:** See `.handoff.md` for session details
+- **Phase:** Wave 1 — Discovery synthesized; ready for pre-implementation validation
+- **Last:** Discovery synthesis complete + 13 ticket updates (2026-04-23)
+- **Done:** Project scaffold, Linear project + Waves 0–6, 7-LLM discovery + synthesis (`research/synthesis.md`), full architecture/UX locked, 3 new gating tickets (PRJ-804/805/806), 10 ticket descriptions updated with locked picks
+- **Next:** **PRJ-804** — Pre-implementation validation checklist (gates everything). 6 physical checks: print/scan tests, Security Rules red-team, Wi-Fi map, Safari auth test, staff phone QR scan test, Grade 5–6 UX copy walkthrough. Then PRJ-778 (scaffold) unblocks the rest.
+- **Handoff:** See `.handoff.md` for full session details + dependency order
 
 ## Project Management
 
@@ -47,14 +47,19 @@ Clean rebuild of a fragile AI-generated fabric-roll inventory prototype. One rol
 - No dual-unit editable stock systems.
 - No elaborate label designer — basic print/download QR only.
 
-## Tech Stack
+## Tech Stack (locked in `research/synthesis.md`)
 
 | Component | Technology |
 |-----------|------------|
-| Hosting | Cloudflare Pages (existing deploy access) |
-| Backend | Firebase / Firestore |
-| Frontend | TBD — decide in Wave 1 DISCOVER (likely Next.js or a light SPA) |
-| QR | TBD — library to be chosen during discovery |
+| Hosting | Cloudflare Pages (Git-push deploy, no SSR) |
+| Backend | Firebase / Firestore — **client SDK only**; Admin SDK forbidden in app path |
+| Frontend | Vite 6 + React 19 + TypeScript strict + pnpm + Tailwind v4, plain SPA |
+| Routing | `react-router-dom` v7 data-router, client-only |
+| State | React Context + Firestore `onSnapshot` (no Redux/Zustand) |
+| Auth | Firebase Auth — email/password + LOCAL persistence (`indexedDBLocalPersistence`) |
+| Offline | `persistentLocalCache` + `persistentMultipleTabManager` (reads); writes BLOCKED when offline (pilot) |
+| QR | `qrcode.react` `<QRCodeSVG>`, Level Q, marginSize=4, SVG only |
+| URL scheme | `https://<short-host>/i/{firestoreAutoId}` — permanent, never regenerated |
 
 ## Client Context
 

@@ -1,0 +1,2 @@
+- [Project philosophy](project-philosophy.md) — cheap portfolio build, reliable, long-term use with minimal upkeep
+- [Infra ownership](infra-ownership.md) — GitHub under Benjamin (portfolio); Cloudflare + Firebase under client (long-term)

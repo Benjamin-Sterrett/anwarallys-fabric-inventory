@@ -38,6 +38,12 @@ next-env.d.ts
 .debug-report.md
 .verification-evidence.md
 .auto-resume.md
+.discovery-notes.md
+.implementation-plan.md
+.task-progress.json
+.agent-spawned
+.agent-done
+.heartbeat
 
 # Discovery
 research/*.md
