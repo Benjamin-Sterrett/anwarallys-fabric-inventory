@@ -44,6 +44,8 @@ next-env.d.ts
 .agent-spawned
 .agent-done
 .heartbeat
+.evidence-archive/
+run-discovery.sh
 
 # Discovery
 research/*.md
