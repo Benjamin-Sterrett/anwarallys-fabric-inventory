@@ -8,10 +8,10 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - `linear issue start PRJ-##` — start working on an issue
 
 ## Current Status
-- **Phase:** Wave 1 — Discovery synthesized; ready for pre-implementation validation
-- **Last:** Discovery synthesis complete + 13 ticket updates (2026-04-23)
-- **Done:** Project scaffold, Linear project + Waves 0–6, 7-LLM discovery + synthesis (`research/synthesis.md`), full architecture/UX locked, 3 new gating tickets (PRJ-804/805/806), 10 ticket descriptions updated with locked picks
-- **Next:** **PRJ-804** — Pre-implementation validation checklist (gates everything). 6 physical checks: print/scan tests, Security Rules red-team, Wi-Fi map, Safari auth test, staff phone QR scan test, Grade 5–6 UX copy walkthrough. Then PRJ-778 (scaffold) unblocks the rest.
+- **Phase:** Wave 1 — Scaffold merged, infrastructure live; awaiting client answers + Pages deploy
+- **Last:** **PRJ-778 MERGED** (PR #1, squash `2b5906d3`) — Vite 6 + React 19 + TS strict + Tailwind v4 + Firebase 10 client SDK scaffold on main. 5 Codex review rounds all resolved. PRJ-807 closed. (2026-04-23 late)
+- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + 13 ticket descriptions updated + repo public + CI green + **scaffold live**
+- **Next:** (1) Client WhatsApp answers to `research/client-questions.md`. (2) Client OAuths Cloudflare Pages to GitHub repo → first deploy lands at their URL. (3) PRJ-804 validation checklist (now that deployed skeleton exists, check #4 Safari auth is actually runnable).
 - **Handoff:** See `.handoff.md` for full session details + dependency order
 
 ## Project Management
@@ -127,4 +127,4 @@ IDENTIFY → DISCOVER → IMPLEMENT → VERIFY → DELIVER → PR-REVIEW → HAN
 2. Update "Current Status" block above.
 3. Commit any uncommitted work.
 
-**Last Updated:** 2026-04-23
+**Last Updated:** 2026-04-23 (PRJ-778 merged)
