@@ -176,11 +176,18 @@ export async function createStaffUser(
       try {
         await updateProfile(cred.user, { displayName: params.displayName.trim() });
       } catch (profileErr: unknown) {
-        // Best-effort: Firestore /users/{uid}.displayName is canonical.
-        // A missing Auth displayName does not break any app flow.
+        // Fail-closed: Auth displayName is required. Delete orphan and surface error.
+        // Retry may hit email-already-in-use if createUser succeeded server-side.
         const profileMessage = profileErr instanceof Error ? profileErr.message : String(profileErr);
-        // eslint-disable-next-line no-console
-        console.warn('[createStaffUser] updateProfile best-effort failed:', profileMessage);
+        try {
+          await deleteUser(cred.user);
+        } catch {
+          // Ignore rollback failure — orphan will be visible in Firebase Console.
+        }
+        return err(
+          'auth/profile-update-failed',
+          `${profileMessage} (Auth displayName could not be set. Account rolled back. Retry may hit email-already-in-use if the user was created server-side.)`,
+        );
       }
     } catch (e: unknown) {
       // Only createUserWithEmailAndPassword failures reach here.
