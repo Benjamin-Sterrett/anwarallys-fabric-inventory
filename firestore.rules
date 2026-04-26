@@ -42,12 +42,15 @@ service cloud.firestore {
     }
 
     // Finite non-negative. NaN >= 0 is false, so NaN is filtered.
-    // `< 1e15` rejects Infinity (a hostile client could otherwise poison
-    // stock math forever — Infinity passes `is number`, `>= 0`, and any
-    // arithmetic). 1e15 is far above any legitimate fabric stock value
-    // (rolls top at ~1000m); pricing is bounded similarly.
+    // The upper bound rejects Infinity (a hostile client could otherwise
+    // poison stock math forever — Infinity passes `is number`, `>= 0`, and
+    // any arithmetic). 10^15 is far above any legitimate fabric stock value
+    // (rolls top at ~1000m); pricing is bounded similarly. The literal is
+    // written long-form (1000000000000000) because the Firestore Security
+    // Rules language does not parse scientific notation; `1e15` fails to
+    // compile and breaks `firebase deploy --only firestore:rules` (PRJ-886).
     function isFiniteNonNeg(v) {
-      return v is number && v >= 0 && v < 1e15;
+      return v is number && v >= 0 && v < 1000000000000000;
     }
 
     function isNonEmptyString(v) {
@@ -59,7 +62,7 @@ service cloud.firestore {
     }
 
     function isNumberOrNull(v) {
-      return v == null || (v is number && v >= 0 && v < 1e15);
+      return v == null || (v is number && v >= 0 && v < 1000000000000000);
     }
 
     function isTimestampOrNull(v) {
