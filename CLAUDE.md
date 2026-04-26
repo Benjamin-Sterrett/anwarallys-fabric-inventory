@@ -11,7 +11,7 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - **Phase:** Wave 1 — Schema + auto-deploy + data boundary shipped; next is Security Rules (PRJ-805) and auth UX (PRJ-781)
 - **Last:** **PRJ-780 MERGED** (PR #4, squash `333f812`) — Firebase data-access boundary: `getDb()` + Firestore w/ `persistentLocalCache` + `persistentMultipleTabManager`, `auth.ts` init scaffold, 4 typed `FirestoreDataConverter`s, query wrappers including `createMovementAndAdjustItem` with `runTransaction` + optimistic concurrency + NaN/Infinity + actor-attribution guards. 4 lead Codex rounds, 9 findings fixed in-PR (PRJ-843..845, PRJ-847..849, PRJ-850..852), 2 deferred under `owner_override` (PRJ-854, PRJ-855).
 - **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + repo public + CI green + scaffold live + auto-deploy + schema shipped + **data boundary shipped**.
-- **Next:** (1) **PRJ-805** Security Rules (Claude-only, CRITICAL — can start immediately, parallel-safe). (2) **PRJ-781** Auth UX (after client supplies 2-3 staff nicknames). (3) PRJ-854 / PRJ-855 follow-ups before any UI consumes `@/lib/queries`. (4) PRJ-841 (tests) + PRJ-842 (ESLint) follow-ups. (5) Client WhatsApp answers (staff nicknames, label sizes). (6) PRJ-804 validation checklist (physical checks).
+- **Next:** (1) **PRJ-805** Security Rules (Claude-only, CRITICAL — can start immediately, parallel-safe). (2) **PRJ-856** Self-service Staff page (replaces the seed-nicknames-from-WhatsApp plan; client adds/renames/deactivates staff himself). (3) **PRJ-781** Auth UX (no longer blocked on nicknames; ships after PRJ-805 + PRJ-856). (4) PRJ-854 / PRJ-855 follow-ups before any UI consumes `@/lib/queries`. (5) PRJ-841 (tests) + PRJ-842 (ESLint) follow-ups. (6) PRJ-804 validation checklist (physical checks).
 - **Open architectural debate:** PRJ-840 — read/write model split. Held unified shape for v1; revisit if pilot surfaces real misuse.
 - **Handoff:** See `.handoff.md` for full session details + dependency order
 
@@ -37,7 +37,7 @@ Clean rebuild of a fragile AI-generated fabric-roll inventory prototype. One rol
 - Folder counts are derived from active item records.
 - Deleted items → recently deleted → auto-clear after 7 days. Restore while in window.
 - Items have a 2–3 line optional description/notes field.
-- Staff/device attribution is simple (device name), not enterprise auth. Actor name required before stock changes.
+- Staff/device attribution: Firebase Auth email/password, device-bound login. Two roles only — `admin` (matches `VITE_ADMIN_EMAIL`) and everyone else. Admin self-services staff via in-app `/staff` page (PRJ-856). No enterprise RBAC.
 - Initial users: 2–3 staff on phone/tablet.
 
 ## Non-goals (v1)
