@@ -4,6 +4,7 @@ import App from '../App';
 import DashboardRoute from './index';
 import LoginRoute from './login';
 import ItemRoute from './item';
+import ItemNewRoute, { ItemEditRoute } from './item-form';
 import RollsAdjustRoute from './rolls-adjust';
 import FolderRoute from './folder';
 import DeletedRoute from './deleted';
@@ -34,6 +35,11 @@ export const router = createBrowserRouter([
       { path: 'i/:itemId', element: <RequireAuth><ItemRoute /></RequireAuth> },
       { path: 'rolls/:id/adjust', element: <RequireAuth><RollsAdjustRoute /></RequireAuth> },
       { path: 'folders/:id', element: <RequireAuth><FolderRoute /></RequireAuth> },
+      // PRJ-784: item create + edit forms. Create is folder-scoped so the
+      // form can derive `folderAncestors` from the parent folder doc.
+      // Edit is item-scoped — the form keeps the item's existing folder.
+      { path: 'folders/:folderId/items/new', element: <RequireAuth><ItemNewRoute /></RequireAuth> },
+      { path: 'items/:itemId/edit', element: <RequireAuth><ItemEditRoute /></RequireAuth> },
       { path: 'deleted', element: <RequireAuth><DeletedRoute /></RequireAuth> },
       { path: 'lowstock', element: <RequireAuth><LowStockRoute /></RequireAuth> },
       { path: 'staff', element: <RequireAdmin><StaffRoute /></RequireAdmin> },

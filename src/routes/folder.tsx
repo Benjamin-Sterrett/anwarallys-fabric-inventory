@@ -13,9 +13,10 @@ import {
   countActiveItemsInSubtree,
   createFolder,
   getFolderById,
+  listActiveItemsInFolder,
   subscribeToFolderChildren,
 } from '@/lib/queries';
-import type { Folder } from '@/lib/models';
+import type { Folder, RollItem } from '@/lib/models';
 
 const SEARCH_DEPTH_MIN = 4;
 const BTN_PRIMARY =
@@ -211,6 +212,22 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
     );
   }, [parentId, retryToken, authUser]);
 
+  // PRJ-784: items directly in this folder (one-shot; refetched on retry).
+  const [items, setItems] = useState<RollItem[] | undefined>(undefined);
+  const [itemsError, setItemsError] = useState<string | null>(null);
+  useEffect(() => {
+    if (authUser === undefined || parentId === null) { setItems([]); setItemsError(null); return; }
+    let cancelled = false;
+    setItems(undefined);
+    setItemsError(null);
+    void listActiveItemsInFolder(parentId).then((r) => {
+      if (cancelled) return;
+      if (r.ok) { setItems(r.data); }
+      else { setItems([]); setItemsError(`Could not load items: ${r.error.message} (${r.error.code})`); }
+    });
+    return () => { cancelled = true; };
+  }, [parentId, authUser, retryToken]);
+
   const [addOpen, setAddOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -269,10 +286,18 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
             />
           </div>
         ) : (
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap gap-2">
             <button type="button" onClick={() => setAddOpen(true)} className={BTN_PRIMARY}>
               New folder
             </button>
+            {/* PRJ-784: items live inside folders, not at root. Hide the
+                CTA on a deleted folder so users don't dead-end into the
+                form (which then errors with "folder has been deleted"). */}
+            {parentId !== null && currentFolder && currentFolder.deletedAt === null ? (
+              <Link to={`/folders/${parentId}/items/new`} className={BTN_PRIMARY}>
+                Add item
+              </Link>
+            ) : null}
           </div>
         )
       ) : null}
@@ -316,6 +341,35 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
           </p>
         </div>
       )}
+
+      {/* PRJ-784: items live INSIDE folders, not at root. Hide on a
+          deleted folder for parity with the "Add item" CTA — rules
+          would reject the resulting edit anyway. Surface query errors
+          so backend failures don't masquerade as empty inventory. */}
+      {parentId !== null && currentFolder && currentFolder.deletedAt === null ? (
+        itemsError ? (
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-700">{itemsError}</p>
+            <button type="button" onClick={() => setRetryToken((n) => n + 1)}
+              className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700">Retry</button>
+          </div>
+        ) : items && items.length > 0 ? (
+          <div className="mt-6">
+            <h2 className="mb-2 text-sm font-medium text-gray-700">Items</h2>
+            <ul className="space-y-2">
+              {items.map((it) => (
+                <li key={it.itemId}>
+                  <Link to={`/items/${it.itemId}/edit`}
+                    className="flex min-h-12 items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 hover:border-gray-300">
+                    <span className="text-base font-medium text-gray-900">{it.sku}</span>
+                    <span className="ml-3 text-xs text-gray-600">{it.remainingMeters} m</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null
+      ) : null}
     </section>
   );
 }

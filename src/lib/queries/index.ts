@@ -11,7 +11,10 @@ export {
   countActiveItemsInSubtree,
   type CreateFolderParams,
 } from './folders';
-export { getItemById, type GetItemByIdOptions } from './items';
+export {
+  getItemById, createItem, updateItem, listActiveItemsInFolder,
+  type GetItemByIdOptions, type CreateItemParams, type UpdateItemParams,
+} from './items';
 export {
   createMovementAndAdjustItem,
   listMovementsForItem,
