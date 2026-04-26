@@ -33,6 +33,7 @@ import {
   listMovementsForItem,
 } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem } from '@/lib/models';
+import RollLabel from '@/components/RollLabel';
 
 const UNDO_WINDOW_MS = 15_000;
 const HISTORY_PAGE_SIZE = 50;
@@ -333,6 +334,12 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
             loading="lazy"
           />
         ) : null}
+        <div className="mt-4">
+          <p className="text-xs uppercase tracking-wide text-gray-500">QR label</p>
+          <div className="mt-2">
+            <RollLabel itemId={item.itemId} />
+          </div>
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
