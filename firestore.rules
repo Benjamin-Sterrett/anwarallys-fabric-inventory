@@ -321,27 +321,37 @@ service cloud.firestore {
         && request.resource.data.deltaMeters == request.resource.data.newMeters - request.resource.data.oldMeters
         && isValidReason(request.resource.data.reason)
         && isStringOrNull(request.resource.data.note)
-        // PRJ-890: typed back-reference for the Undo path. Field-presence
-        // check (PRJ-865 pattern) — an omitted key reads as `null` and
-        // would silently pass `isStringOrNull`, leaving the doc with no
-        // key at all. Forcing the key to be present keeps the audit-log
-        // shape uniform across reversal and non-reversal movements.
+        // PRJ-890: typed back-reference for the Undo path.
         //
-        // Forgery guard: when non-null, the referenced movement must exist
-        // and target the SAME item. Without this, a hostile client could
-        // mislabel any movement as "undone" by pointing at an arbitrary ID
-        // (or even a different item's history). Reversal direction is also
-        // pinned: reason MUST be 'correction' (matches the boundary's Undo
-        // path), and the reversed doc cannot itself be a reversal (no
-        // chained-undo loops in the audit log). The inverse meter-pairing
-        // (this movement's newMeters == reversed.oldMeters AND oldMeters
-        // == reversed.newMeters) is enforced too so a forged reversal
+        // Backward-compat (lead Codex round 1): the field is OPTIONAL on
+        // the wire. Pre-PRJ-890 bundles still loaded in tabs at deploy
+        // time write movements WITHOUT the `reversesMovementId` key;
+        // Cloudflare Pages does not force-reload open sessions, so a
+        // strict `keys().hasAll(['reversesMovementId'])` would 403 every
+        // stock adjustment from those tabs until the user refreshed.
+        // PRJ-865's hasAll pattern was specific to soft-delete fields
+        // where absent-vs-null mattered for `where('field','==',null)`
+        // active-query visibility. Reverse-lookup queries on
+        // `reversesMovementId` are equivalent: absent and null both
+        // encode "this is not a reversal of anything", and Firestore
+        // reads return `null` for omitted fields.
+        //
+        // Forgery guard (when present and non-null): the referenced
+        // movement must exist and target the SAME item. Without this, a
+        // hostile client could mislabel any movement as "undone" by
+        // pointing at an arbitrary ID (or even a different item's
+        // history). Reversal direction is also pinned: reason MUST be
+        // 'correction' (matches the boundary's Undo path), and the
+        // reversed doc cannot itself be a reversal (no chained-undo
+        // loops in the audit log). The inverse meter-pairing (this
+        // movement's newMeters == reversed.oldMeters AND oldMeters ==
+        // reversed.newMeters) is enforced too so a forged reversal
         // can't claim to undo a movement whose math doesn't match.
-        && request.resource.data.keys().hasAll(['reversesMovementId'])
-        && isStringOrNull(request.resource.data.reversesMovementId)
         && (
-          request.resource.data.reversesMovementId == null
-          || (request.resource.data.reason == 'correction'
+          !request.resource.data.keys().hasAny(['reversesMovementId'])
+          || request.resource.data.reversesMovementId == null
+          || (request.resource.data.reversesMovementId is string
+            && request.resource.data.reason == 'correction'
             // Undo target MUST be the item's CURRENT last movement — the
             // boundary's Undo affordance only points at the most recent
             // adjustment. Without this, a client could label any older
