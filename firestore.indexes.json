@@ -15,7 +15,7 @@
       "fields": [
         { "fieldPath": "folderId", "order": "ASCENDING" },
         { "fieldPath": "deletedAt", "order": "ASCENDING" },
-        { "fieldPath": "name", "order": "ASCENDING" }
+        { "fieldPath": "sku", "order": "ASCENDING" }
       ]
     },
     {
