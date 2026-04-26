@@ -1,39 +1,28 @@
 // /staff — admin-only self-service staff management (PRJ-856 / PRJ-871).
 //
 // ─── Two-layer admin gate ────────────────────────────────────────────────
-// 1. Client (this file): `isAdminEmail(user.email) && user.emailVerified`.
-//    Purpose is UX only — show the right page to the right person and avoid
-//    a Firestore round-trip just to learn "not allowed". Client gates are
+// 1. Client (router.tsx wraps this route in `<RequireAdmin>`): purpose is
+//    UX only — show the right page to the right person and avoid a
+//    Firestore round-trip just to learn "not allowed". Client gates are
 //    NEVER security; a hostile client can edit the bundle.
 // 2. Server (`firestore.rules` `isAdminUser()`): the real authz. Compares
 //    `request.auth.token.email` to `/config/admin.adminEmail` AND requires
 //    `request.auth.token.email_verified == true`. Every write the page
 //    issues passes through these Rules.
 //
-// We mirror BOTH conditions client-side so we don't render a working-looking
-// UI to an unverified admin only to have every action fail with
-// `permission-denied`. PRJ-873 will durably fix the email-casing parity in
-// Rules; today the working assumption is `/config/admin.adminEmail` is
-// always lowercase and `isAdminEmail()` lowercases both sides defensively.
-//
-// ─── Auth state contract ─────────────────────────────────────────────────
-//   `authUser === undefined` → still loading first auth callback. Render
-//      a loading shell, do not redirect.
-//   `authUser === null`      → not signed in. Render "Admin only" + link
-//      to `/`.
-//   `authUser` is a User but not admin or not verified → "Admin only" +
-//      link to `/`.
-//   admin + verified → render the staff manager.
+// PRJ-781 lifted the inline auth subscription out of this file into the
+// shared `<RequireAdmin>` guard (`src/routes/RequireAuth.tsx`). By the
+// time `StaffRoute` renders, `<RequireAdmin>` has already verified
+// `isAdminEmail(user.email) && user.emailVerified`. We still subscribe
+// once to read `user.uid` + `user.email` for `<StaffManager>` props.
 //
 // Mobile-first per CLAUDE.md UX rules: 48x48 minimum touch targets
 // (`min-h-12 min-w-12`). ESL-friendly copy: short sentences, plain English.
 // Errors surfaced inline; never silent.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { isAdminEmail } from '@/lib/auth/isAdmin';
 import {
   createStaffUser,
   deactivateStaffUser,
@@ -45,23 +34,6 @@ import {
 import type { User } from '@/lib/models';
 
 type AuthState = FirebaseUser | null | undefined;
-
-function NotAuthorized({ reason }: { reason: string }) {
-  return (
-    <section className="mx-auto max-w-xl px-4 py-10">
-      <div className="rounded-lg border border-gray-200 bg-white p-6 text-center">
-        <h1 className="text-2xl font-semibold text-gray-900">Admin only</h1>
-        <p className="mt-2 text-sm text-gray-700">{reason}</p>
-        <Link
-          to="/"
-          className="mt-6 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white"
-        >
-          Go to the home page
-        </Link>
-      </div>
-    </section>
-  );
-}
 
 function LoadingShell() {
   return (
@@ -468,6 +440,11 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
 }
 
 export default function StaffRoute() {
+  // <RequireAdmin> in router.tsx already verified the user is signed in,
+  // is the admin, and has emailVerified === true. We subscribe here only
+  // to read the resolved User so we can hand uid + email to StaffManager.
+  // Race window: there is a one-frame gap between RequireAdmin's
+  // resolution and StaffRoute's first effect; the LoadingShell covers it.
   const [authUser, setAuthUser] = useState<AuthState>(undefined);
 
   useEffect(() => {
@@ -480,15 +457,7 @@ export default function StaffRoute() {
     [],
   );
 
-  if (authUser === undefined) return <LoadingShell />;
-  if (authUser === null) {
-    return <NotAuthorized reason="You must sign in as the admin to manage staff." />;
-  }
-  if (!isAdminEmail(authUser.email) || !authUser.emailVerified) {
-    return (
-      <NotAuthorized reason="You are not the admin. Only the admin can manage staff." />
-    );
-  }
+  if (!authUser) return <LoadingShell />;
 
   return <StaffManager adminUid={authUser.uid} adminEmail={adminEmailEnv} />;
 }

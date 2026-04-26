@@ -1,7 +1,10 @@
 import { Outlet, Link } from 'react-router-dom';
+import AuthBar from './components/AuthBar';
 
-// App shell. In future tickets this will wrap Outlet in <AuthGate> and add
-// the global SyncStatusIndicator. For the scaffold it's a thin layout.
+// App shell. <AuthBar> renders below the brand header for every route;
+// it self-hides when there is no signed-in user (the route guard handles
+// redirects to /login). Future tickets add a global SyncStatusIndicator
+// alongside it.
 export default function App() {
   return (
     <div className="min-h-full flex flex-col">
@@ -13,6 +16,7 @@ export default function App() {
           <span className="text-xs text-gray-500">Scaffold build</span>
         </div>
       </header>
+      <AuthBar />
       <main className="flex-1">
         <Outlet />
       </main>
