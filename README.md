@@ -101,6 +101,25 @@ All routes except `/` are placeholder stubs. Real feature work lives in later ti
 | `/deleted` | Recently deleted (7-day) | PRJ-796 |
 | `/lowstock` | Low-stock view | PRJ-798 |
 
+## Sign in
+
+Every page except `/login` requires sign-in. Hitting a protected URL while signed out redirects to `/login?continue=<path>`; after sign-in the app lands back on the original path. QR scans (`/i/:itemId`) are protected too — Firestore Security Rules require `isActiveStaff()` to read items, so an unauthenticated scan goes through sign-in first and lands on the item.
+
+**Bootstrap (one-time):**
+
+1. Create the admin's Firebase Auth user in the Firebase Console (Authentication → Users → Add user). Set `Email verified` to `true` — Auth rules require it (parity with `firestore.rules` `isAdminUser()`).
+2. Set `VITE_ADMIN_EMAIL` in `.env.local` (and in Cloudflare Pages env for production) to that same email.
+3. Seed `/config/admin` in Firestore with field `adminEmail` set to the same email — see "Firestore Security Rules" below.
+4. Seed a `/users/{adminUid}` doc with `displayName` and `isActive: true` — required for the admin to write inventory and movements.
+
+After bootstrap the admin signs in once at `/login` and uses `/staff` to add the rest of the staff. Each new staff member can sign in immediately with the email + password the admin set.
+
+**Sign-out, deactivation, and persistence:**
+
+- Sessions persist via `[indexedDBLocalPersistence, browserLocalPersistence]`. Staff stay signed in on a device until they tap "Sign out" in the top bar.
+- Deactivating a staff member from `/staff` flips `isActive` to `false`. The next Firestore read or write from that user fails immediately because Rules `isActiveStaff()` checks `isActive == true`. The user's existing browser session continues to display Auth-resolved chrome (their displayName) but every data action will fail until they're reactivated.
+- iOS Safari ITP is mitigated by sticking to email/password (no third-party providers like Google/Apple, which trigger third-party-storage restrictions on Safari).
+
 ## Bundle size
 
 First build (scaffold only, no Firebase wiring yet):

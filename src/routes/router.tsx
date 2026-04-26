@@ -10,23 +10,34 @@ import DeletedRoute from './deleted';
 import LowStockRoute from './lowstock';
 import NotFoundRoute from './not-found';
 import StaffRoute from './staff';
+import { RequireAdmin, RequireAuth } from './RequireAuth';
 
 // Single source of truth for the route tree. Adding a route = add a line here.
 // Paths mirror the URL scheme locked in research/synthesis.md §2 + §3.
+//
+// PRJ-781: every path EXCEPT /login is wrapped in <RequireAuth>. /staff
+// is wrapped in <RequireAdmin>. Wrapping at this level keeps the route
+// components themselves free of guard plumbing — the guard renders the
+// LoadingShell while auth resolves, redirects to /login on null, and
+// renders the route only after the user is verified.
+//
+// /i/:itemId (QR scan landing) IS wrapped: firestore.rules `match /items`
+// requires `isActiveStaff()` to read, so an unauthenticated scan must
+// land on /login first and round-trip back via the `continue` param.
 export const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <DashboardRoute /> },
+      { index: true, element: <RequireAuth><DashboardRoute /></RequireAuth> },
       { path: 'login', element: <LoginRoute /> },
-      { path: 'i/:itemId', element: <ItemRoute /> },
-      { path: 'rolls/:id/adjust', element: <RollsAdjustRoute /> },
-      { path: 'folders/:id', element: <FolderRoute /> },
-      { path: 'deleted', element: <DeletedRoute /> },
-      { path: 'lowstock', element: <LowStockRoute /> },
-      { path: 'staff', element: <StaffRoute /> },
-      { path: '*', element: <NotFoundRoute /> },
+      { path: 'i/:itemId', element: <RequireAuth><ItemRoute /></RequireAuth> },
+      { path: 'rolls/:id/adjust', element: <RequireAuth><RollsAdjustRoute /></RequireAuth> },
+      { path: 'folders/:id', element: <RequireAuth><FolderRoute /></RequireAuth> },
+      { path: 'deleted', element: <RequireAuth><DeletedRoute /></RequireAuth> },
+      { path: 'lowstock', element: <RequireAuth><LowStockRoute /></RequireAuth> },
+      { path: 'staff', element: <RequireAdmin><StaffRoute /></RequireAdmin> },
+      { path: '*', element: <RequireAuth><NotFoundRoute /></RequireAuth> },
     ],
   },
 ]);

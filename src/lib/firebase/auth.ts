@@ -6,9 +6,11 @@ import {
   indexedDBLocalPersistence,
   browserLocalPersistence,
   onAuthStateChanged,
+  signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type Auth,
   type User,
+  type UserCredential,
   type Unsubscribe,
 } from 'firebase/auth';
 import { getFirebaseApp } from './app';
@@ -59,4 +61,26 @@ export async function signOut(): Promise<void> {
   const auth = getAuth();
   if (!auth) return;
   await firebaseSignOut(auth);
+}
+
+/**
+ * Sign in with email + password. Throws on failure — caller catches
+ * `FirebaseError` and maps `error.code` to a plain-language message.
+ *
+ * `getAuth()` returns `null` only when Firebase env config is missing
+ * (CI builds, misconfigured deploys). Surface this as a sentinel error
+ * so the login form shows a real message instead of silently rejecting.
+ */
+export async function signIn(email: string, password: string): Promise<UserCredential> {
+  const auth = getAuth();
+  if (!auth) {
+    // Mirrors FirebaseError shape so the login form's error mapper can
+    // recognize it; `auth/internal-error` is a real Firebase code that
+    // the form maps to "Could not sign in: <message>".
+    throw Object.assign(new Error('Firebase is not configured.'), {
+      name: 'FirebaseError',
+      code: 'auth/internal-error',
+    });
+  }
+  return signInWithEmailAndPassword(auth, email, password);
 }
