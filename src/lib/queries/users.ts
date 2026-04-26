@@ -24,6 +24,7 @@ import {
   deleteUser,
   inMemoryPersistence,
   initializeAuth,
+  updateProfile,
 } from 'firebase/auth';
 import {
   collection,
@@ -164,14 +165,40 @@ export async function createStaffUser(
     const secondaryAuth = initializeAuth(secondaryApp, { persistence: inMemoryPersistence });
 
     let newUid: string;
+    let cred: import('firebase/auth').UserCredential;
     try {
-      const cred = await createUserWithEmailAndPassword(
+      cred = await createUserWithEmailAndPassword(
         secondaryAuth,
         params.email.trim(),
         params.password,
       );
       newUid = cred.user.uid;
+      try {
+        await updateProfile(cred.user, { displayName: params.displayName.trim() });
+      } catch (profileErr: unknown) {
+        // Fail-closed: Auth displayName is required. Delete orphan and surface error.
+        const profileMessage = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        let rollbackOk = false;
+        try {
+          await deleteUser(cred.user);
+          rollbackOk = true;
+        } catch {
+          // Rollback failed — account state unknown (same network class as the
+          // original updateProfile error). Do NOT tell admin it is safe to retry.
+        }
+        if (rollbackOk) {
+          return err(
+            'auth/profile-update-failed',
+            `${profileMessage} (Auth account rolled back.)`,
+          );
+        }
+        return err(
+          'auth/profile-update-failed',
+          `${profileMessage} (Account state unknown. Verify in Firebase Console before retrying — a stale Auth account would block re-creation.)`,
+        );
+      }
     } catch (e: unknown) {
+      // Only createUserWithEmailAndPassword failures reach here.
       // Auth network/timeout errors leave the account state UNKNOWN; admin
       // must verify in Firebase Console before retrying (a blind retry
       // would hit `auth/email-already-in-use` on an orphan).
@@ -275,6 +302,9 @@ export async function renameStaffUser(
 
   try {
     const ref = doc(db, 'users', uid).withConverter(userConverter);
+    // Auth displayName is intentionally NOT updated here: the Firebase client
+    // SDK cannot update another user's Auth profile. AuthBar uses Firestore
+    // `/users/{uid}.displayName` as the canonical source.
     await updateDoc(ref, {
       displayName: newDisplayName.trim(),
       updatedAt: serverTimestamp(),
