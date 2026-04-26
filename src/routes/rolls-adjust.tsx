@@ -11,7 +11,7 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
+import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
 import { randomUUIDv4 } from '@/lib/util/uuid';
 
@@ -211,10 +211,23 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Mount-time server-authoritative read (R7 P1, PRJ-883 / PRJ-893): the
+  // "Reload page" affordance is the only recovery path after an inconclusive
+  // timeout, so cache-backed mount could rehydrate pre-commit `remainingMeters`
+  // and defeat the safety net. Forcing a server roundtrip guarantees the
+  // operator sees state after any in-flight tx settles. Trade-off: this route
+  // is no longer offline-friendly on initial mount (writes are blocked offline
+  // anyway per pilot policy). Browse routes still use cache-backed reads.
   const reloadItem = useCallback(() => {
     setItem(undefined); setLoadError(null);
-    void getItemById(itemId).then((r) => {
-      if (!r.ok) { setItem(null); setLoadError(`Could not load item: ${r.error.message} (${r.error.code})`); return; }
+    void getItemByIdFromServer(itemId).then((r) => {
+      if (!r.ok) {
+        setItem(null);
+        const offline = r.error.code === 'firestore/unavailable';
+        const hint = offline ? ' You appear to be offline; reconnect and reload.' : '';
+        setLoadError(`Could not load this item: ${r.error.message} (${r.error.code}).${hint}`);
+        return;
+      }
       if (!r.data) { setItem(null); setLoadError('That item is missing or has been deleted.'); return; }
       setItem(r.data);
     });
