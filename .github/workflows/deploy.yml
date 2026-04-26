@@ -60,6 +60,7 @@ jobs:
                    VITE_ADMIN_EMAIL; do
             if [ -z "${!v}" ]; then missing+=("$v"); fi
           done
+          if [ -z "${VITE_PUBLIC_HOST:-}" ]; then missing+=("VITE_PUBLIC_HOST"); fi
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required deploy secrets/vars: ${missing[*]}"
             echo "Set secrets with: gh secret set <NAME>"
