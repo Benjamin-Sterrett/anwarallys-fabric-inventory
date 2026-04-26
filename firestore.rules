@@ -76,7 +76,8 @@ service cloud.firestore {
       return t == request.time;
     }
 
-    // /folders — tree nodes. Soft-delete only; hard delete forbidden.
+    // /folders — tree nodes. v1: rename-only. Both client soft-delete
+    // and hard-delete are blocked; PRJ-796 ships subtree-aware delete.
     match /folders/{folderId} {
       allow read: if isActiveStaff();
 
@@ -105,42 +106,39 @@ service cloud.firestore {
         );
 
       // Updates: `createdAt`, `createdBy`, `parentId`, `ancestors`, `depth`
-      // are immutable. Renames change `name` + `updatedAt`/`updatedBy`.
-      // Soft-delete and restore flow `deletedAt` and `deletedBy` between
-      // null and Timestamp/string values.
+      // are immutable. Folders in v1 are RENAME-ONLY — `deletedAt` and
+      // `deletedBy` are also unchanged on every update.
+      //
+      // PRJ-863: in-app folder soft-delete is blocked entirely in v1.
+      // Firestore Security Rules cannot iterate `folderAncestors[]` (no
+      // list-iteration primitive), so we cannot reject item writes inside
+      // descendants of a soft-deleted ancestor. Items.update only checks
+      // the DIRECT parent folder, leaving grandchildren and below freely
+      // writable. Disabling folder soft-delete in Rules forecloses this
+      // entire class of orphan-corruption bug. Folder lifecycle (delete,
+      // cascade, restore with subtree-empty checks) lands in PRJ-796
+      // (Wave 5) with the proper `getCountFromServer`-based UI flow.
+      // Manual cleanup limited to hard-deleting empty leaf folders only;
+      // see README "Firestore Security Rules" section. PRJ-863 supersedes
+      // the round-2 PRJ-860 deferral.
+      // Folders that are already soft-deleted (e.g. via Firebase Console
+      // override) are fully immutable from the client. No renames, no
+      // restores. PRJ-796 will introduce the proper restore flow.
       allow update: if isActiveStaff()
+        && resource.data.deletedAt == null
         && unchanged('createdAt')
         && unchanged('createdBy')
         && unchanged('parentId')
         && unchanged('ancestors')
         && unchanged('depth')
+        && unchanged('deletedAt')
+        && unchanged('deletedBy')
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.updatedBy == request.auth.uid
-        && isNonEmptyString(request.resource.data.name)
-        // Delete-state transitions mirror the item rule. Renames are
-        // forbidden while soft-deleted (would survive restore — same
-        // attack as PRJ-858 on items). Restore on a non-root folder
-        // requires the parent chain to still be active.
-        && (
-          // Transition 1: no delete-state change, item is active. Renames OK.
-          (resource.data.deletedAt == null
-            && unchanged('deletedAt') && unchanged('deletedBy'))
-          // Transition 2: active → deleted. Lock name.
-          || (resource.data.deletedAt == null
-            && request.resource.data.deletedAt == request.time
-            && request.resource.data.deletedBy == request.auth.uid
-            && unchanged('name'))
-          // Transition 3: deleted → restored. Lock name; parent must still be active.
-          || (resource.data.deletedAt != null
-            && request.resource.data.deletedAt == null
-            && request.resource.data.deletedBy == null
-            && unchanged('name')
-            && (resource.data.parentId == null
-              || (exists(/databases/$(database)/documents/folders/$(resource.data.parentId))
-                && get(/databases/$(database)/documents/folders/$(resource.data.parentId)).data.deletedAt == null)))
-        );
+        && isNonEmptyString(request.resource.data.name);
 
-      // Hard delete is forbidden. Use soft-delete via `deletedAt`.
+      // Hard delete is forbidden in v1. Soft-delete is also blocked here
+      // (see comment block above). PRJ-796 ships the real flow.
       allow delete: if false;
     }
 
@@ -245,10 +243,24 @@ service cloud.firestore {
             && unchanged('supplier') && unchanged('price')
             && unchanged('lastMovementId'))
           // Transition 3: deleted → restored. Lock every other field too.
+          // PRJ-862: restore window is anchored to `items.deletedAt`
+          // (server-stamped, trusted). Allowed if `request.time` is
+          // within 7 days of `deletedAt`. We do NOT also require the
+          // tombstone to exist — that would make the restore window
+          // sensitive to TTL-purge timing on a client-supplied
+          // `expireAt` whose lower bound has a 5-minute clock-skew
+          // allowance (firestore.rules /deletedRecords create rule).
+          // We DO re-verify the parent folder is still alive: if a
+          // Console operator deleted the folder during the 7d window,
+          // restore is blocked so we never reactivate an item under a
+          // missing or deleted folder (PRJ-863 alignment).
           || (resource.data.deletedAt != null
             && request.resource.data.deletedAt == null
             && request.resource.data.deletedBy == null
             && request.resource.data.deleteReason == null
+            && (request.time.toMillis() - resource.data.deletedAt.toMillis()) <= 7 * 24 * 60 * 60 * 1000
+            && exists(/databases/$(database)/documents/folders/$(resource.data.folderId))
+            && get(/databases/$(database)/documents/folders/$(resource.data.folderId)).data.deletedAt == null
             && unchanged('sku') && unchanged('description') && unchanged('folderId')
             && unchanged('folderAncestors') && unchanged('remainingMeters')
             && unchanged('minimumMeters') && unchanged('photoUrl')
@@ -308,7 +320,7 @@ service cloud.firestore {
     }
 
     // /deletedRecords — trash-bin tombstones. TTL on expireAt purges 7d.
-    // Snapshot fully cross-checked vs items doc; expireAt bound [6, 8] days.
+    // Snapshot fully cross-checked vs items doc; expireAt bound `[7d, 7d+15m]`.
     match /deletedRecords/{itemId} {
       allow read: if isActiveStaff();
 
@@ -320,9 +332,18 @@ service cloud.firestore {
         && request.resource.data.expireAt is timestamp
         && isNonEmptyString(request.resource.data.folderIdAtDelete)
         && request.resource.data.folderAncestorsAtDelete is list
-        // 7-day retention bound, ±1 day for clock skew / TTL imprecision.
-        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) >= 6 * 24 * 60 * 60 * 1000
-        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) <= 8 * 24 * 60 * 60 * 1000
+        // Retention bounds are tight to the 7-day restore window:
+        // floor exactly 7d, ceiling 7d + 15min. Trash-bin UI in PRJ-797
+        // can therefore use tombstone existence as a proxy for
+        // restorability without surfacing entries that are no longer
+        // restorable. The 15-min upper margin absorbs TTL-purge
+        // imprecision (TTL fires within hours of expireAt typically,
+        // not exact). The PRJ-796 soft-delete data boundary MUST
+        // compute `expireAt = device_now + 7d + safety_buffer` (≤ 15
+        // min) to land inside this band — a slow client clock computing
+        // exactly 7d from local time will fail the floor.
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) >= 7 * 24 * 60 * 60 * 1000
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) <= 7 * 24 * 60 * 60 * 1000 + 15 * 60 * 1000
         // Snapshot integrity: every field of the snapshot must mirror the
         // pre-commit items doc. The snapshot is the recovery payload if
         // the live doc is ever missing — forging it would corrupt restore.

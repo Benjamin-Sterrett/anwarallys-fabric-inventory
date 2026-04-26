@@ -47,6 +47,7 @@ Clean rebuild of a fragile AI-generated fabric-roll inventory prototype. One rol
 - No data migration — current app has nothing worth preserving.
 - No dual-unit editable stock systems.
 - No elaborate label designer — basic print/download QR only.
+- No folder deletion in v1 (in-app or via Console for non-leaf folders). Folders are rename-only; Rules cannot enforce subtree state and Console deletes of non-leaf folders recreate the orphan problem. Lands in PRJ-796 (Wave 5) with subtree-empty UI checks.
 
 ## Tech Stack (locked in `research/synthesis.md`)
 

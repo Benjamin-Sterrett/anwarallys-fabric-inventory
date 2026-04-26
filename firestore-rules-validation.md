@@ -53,18 +53,24 @@ Run scenarios via the Emulator UI Rules Playground or `@firebase/rules-unit-test
 | 19 | Active staff creates `/deletedRecords/{itemId}` while items doc still has `deletedAt == null` | Rejected (`getAfter()` cross-check requires items.deletedAt != null) | _pending_ |
 | 20 | Active staff creates `/deletedRecords/{itemId}` for an item that doesn't exist | Rejected (`exists()` precheck) | _pending_ |
 | 21 | Items update with client-set `deletedAt: Timestamp.now()` | Rejected (server-stamp required) | _pending_ |
-| 22 | Tombstone with `expireAt` 30 days out, OR `snapshot.sku` not matching items.sku | Rejected (retention bound + snapshot integrity) | _pending_ |
+| 22 | Tombstone with `expireAt` < 7 days OR > `7d + 15min` from `request.time`, OR `snapshot.sku` not matching items.sku | Rejected (retention bound `[7d, 7d+15min]` + snapshot integrity). PRJ-796 boundary computes `expireAt = device_now + 7d + buffer (≤15min)` to absorb clock skew. | _pending_ |
 | 23 | Stock change (items.update remainingMeters OR /movements create) on `deletedAt != null` item | Rejected (no stock on deleted) | _pending_ |
 | 24 | Admin with `email_verified: false` creates `/users/{uid}` | Rejected | _pending_ |
 | 25 | Items create with `remainingMeters: Infinity` (PRJ-857) | Rejected (`< 1e15` bound) | _pending_ |
 | 26 | Items update on a soft-deleted item changing `sku` (PRJ-858) | Rejected (only restore allowed) | _pending_ |
-| 27 | Folder update renaming a soft-deleted folder | Rejected (PRJ-858 mirror) | _pending_ |
+| 27 | Folder update setting `deletedAt: null → request.time` (soft-delete attempt) | Rejected (PRJ-863 — folder soft-delete blocked entirely in v1) | _pending_ |
 | 28 | Movement create with `actorName` ≠ caller's `displayName` (PRJ-859) | Rejected (anti-spoof) | _pending_ |
 | 29a | Active staff (non-admin) `getDoc(/users/{ownUid})` (PRJ-861) | Allowed (own profile only) | _pending_ |
 | 29b | Active staff (non-admin) `getDoc(/users/{otherUid})` (PRJ-861) | Rejected (no coworker email leak) | _pending_ |
 | 29c | Active staff (non-admin) `getDocs(collection(db, 'users'))` (PRJ-861) | Rejected (list = admin only) | _pending_ |
 | 29d | Admin `getDocs(collection(db, 'users'))` (PRJ-861) | Allowed | _pending_ |
-| 30 | Active staff edits an item whose `folderId` is active but a folderAncestor is soft-deleted (PRJ-860) | Allowed (Rules don't iterate ancestors). PRJ-796 UI must prevent this state from existing. | _pending_ |
+| 30 | Items restore more than 7 days after `items.deletedAt` (PRJ-862) | Rejected (`request.time - deletedAt <= 7 days` derives from server-stamped deletedAt, immune to expireAt manipulation) | _pending_ |
+| 31 | Items restore at `deletedAt + 7d + 12h` (12 hours past the 7-day window) (PRJ-862) | Rejected (`request.time - deletedAt > 7 days`) | _pending_ |
+| 32 | Folder update changing `deletedBy` while leaving `deletedAt` null (PRJ-863) | Rejected (both fields fully unchanged) | _pending_ |
+| 33 | Folder update (e.g. rename) on a folder where `deletedAt != null` (Console-soft-deleted) (PRJ-863) | Rejected (folders are fully immutable once soft-deleted) | _pending_ |
+| 34 | Items restore where the parent folder was Console-soft-deleted DURING the 7d window | Rejected (folder existence + active check on restore branch) | _pending_ |
+| 35 | Items restore where the parent folder was Console-HARD-deleted DURING the 7d window | Rejected (`exists(folder)` fails) | _pending_ |
+| 36 | Items.update (rename, folder-move, anything) on an active item under a Console-soft-deleted folder | Rejected (existing `folder.deletedAt == null` check on items.update) | _pending_ |
 
 ## Atomic stock-write enforcement
 
@@ -88,10 +94,7 @@ attributable audit row.
 ## Known v1 limitations (deferred)
 
 - **Re-delete within 7d:** restoring then re-deleting fails because the prior tombstone still exists. Wait for TTL or Console-clear. Follow-up filed.
-- **Folder cascade / orphaned descendants (PRJ-860):** Firestore Security Rules architecturally cannot enforce subtree state. Rules expressions can `get()` specific docs but not iterate collections (no `getDocs`/aggregate-query primitive in Rules), and Rules has no list-iteration primitive to walk an item's `folderAncestors[]`. Server-side cascade code is banned by project invariant (client SDK only).
-  - **What Rules DO check:** items.update / items.create require the DIRECT parent folder (`folderId`) to be active. So you cannot move an item directly under a soft-deleted folder.
-  - **What Rules do NOT check:** ancestor folders along `folderAncestors[]` are not re-validated on item writes, and folder.update does not re-check ancestor state on rename or restore. An active child folder under a soft-deleted GRANDPARENT can still be renamed, and items under that active child can still be edited and stock-adjusted. This is a real authz gap, not a "frozen" state.
-  - **Mitigation:** PRJ-796 (Wave 5 soft-delete UI) MUST enforce empty-subtree-before-delete via `getCountFromServer` on the full subtree, not just direct children. Until that ships, soft-deleting a non-leaf folder leaves the descendant subtree fully writable. NOT a Rules-fixable gap.
+- **Folder soft-delete blocked entirely in v1 (PRJ-863, supersedes PRJ-860):** Firestore Security Rules cannot iterate `folderAncestors[]` (no list-iteration primitive in Rules expressions), so we cannot reject item writes inside descendants of a soft-deleted ancestor. Items.update only checks the DIRECT parent folder, leaving grandchildren and below freely writable — a real authz gap, not a contained one. Rather than ship rules that look stronger than they are, v1 disables in-app folder soft-delete entirely: `unchanged('deletedAt')` and `unchanged('deletedBy')` on every folder update, plus `resource.data.deletedAt == null` so already-deleted folders are fully immutable. Folders are rename-only. **Do NOT use the Firebase Console to soft-delete or hard-delete non-leaf folders** — that recreates the orphan-descendant state Rules can't contain. Only safe manual cleanup is hard-deleting an empty leaf folder. The proper subtree-aware delete flow lands in PRJ-796 (Wave 5).
 
 ## Sign-off
 

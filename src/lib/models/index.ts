@@ -179,7 +179,11 @@ export interface DeletedRecord {
   deletedBy: string;
   deleteReason: string | null;
   // Concrete future timestamp set by the client. Rules bound it to
-  // `[6 days, 8 days]` from `request.time` (PRJ-805).
+  // `[7 days, 7 days + 15 minutes]` from `request.time` (PRJ-805).
+  // The PRJ-796 soft-delete data boundary must compute `expireAt =
+  // device_now + 7d + safety_buffer (≤ 15 min)` to land inside this
+  // band — a slow-client device computing exactly 7d from local time
+  // will fail the lower bound.
   expireAt: Timestamp;
   folderIdAtDelete: string;
   folderAncestorsAtDelete: string[];
