@@ -14,6 +14,7 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
 import { randomUUIDv4 } from '@/lib/util/uuid';
+import ReasonChips, { reasonLabel } from '@/components/ReasonChips';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -30,12 +31,7 @@ const UNDO_WINDOW_MS = 15_000;
 const RECONCILE_RETRY_DELAY_MS = 2500;
 const RECONCILE_MAX_ATTEMPTS = 2;
 
-const REASONS: ReadonlyArray<{ value: MovementReason; label: string }> = [
-  { value: 'sold', label: 'Sold' }, { value: 'cut', label: 'Cut' },
-  { value: 'damage', label: 'Damage' }, { value: 'return', label: 'Return' },
-  { value: 'correction', label: 'Correction' }, { value: 'receive', label: 'Receive' },
-  { value: 'other', label: 'Other' },
-];
+
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
 const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
@@ -609,33 +605,15 @@ function AdjustPage({ itemId }: { itemId: string }) {
         {parsed !== null && noChange ? <span className="text-xs text-gray-600">No change to save.</span> : null}
       </div>
 
-      <fieldset className="mb-4">
-        <legend className="text-sm font-medium text-gray-800">Reason</legend>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {REASONS.map((r) => {
-            const selected = reason === r.value;
-            return (
-              <button key={r.value} type="button" onClick={() => setReason(r.value)} aria-pressed={selected}
-                disabled={inconclusivePending}
-                className={`${BTN_BASE} ${selected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-800'} px-4 py-2`}>
-                {r.label}
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      {reason === 'other' ? (
-        <label className="mb-4 block">
-          <span className="text-sm font-medium text-gray-800">Note (required)</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, NOTE_MAX))}
-            disabled={inconclusivePending}
-            rows={2} maxLength={NOTE_MAX} placeholder="What happened?" className={`${INPUT} disabled:bg-gray-100 disabled:opacity-50`} />
-          <span className="mt-1 block text-xs text-gray-600">
-            {noteTrimmed.length}/{NOTE_MAX} — at least {NOTE_MIN_OTHER} characters.
-          </span>
-        </label>
-      ) : null}
+      <ReasonChips
+        value={reason}
+        onChange={setReason}
+        disabled={inconclusivePending}
+        note={note}
+        onNoteChange={setNote}
+        noteMaxLength={NOTE_MAX}
+        noteMinLength={NOTE_MIN_OTHER}
+      />
 
       {submitError ? <p className="mb-3 text-sm text-red-700" role="alert">{submitError}</p> : null}
 
@@ -660,7 +638,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
             </p>
             {reason ? (
               <p className="mt-1 text-xs text-gray-600">
-                Reason: {REASONS.find((r) => r.value === reason)?.label}
+                Reason: {reasonLabel(reason)}
                 {reason === 'other' && noteTrimmed ? ` — ${noteTrimmed}` : ''}
               </p>
             ) : null}
