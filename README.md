@@ -29,6 +29,14 @@ Locked in `research/synthesis.md` §3:
 
 No SSR. No `firebase-admin`. No server-side anything — Firestore Security Rules are the entire authz surface.
 
+### Data access boundary
+
+UI components MUST import data-access helpers from `@/lib/queries`. Direct calls to `getFirestore()`, `collection()`, `doc()`, `setDoc()`, `updateDoc()`, or `runTransaction()` from React components are forbidden by convention. The single Firestore accessor lives in `src/lib/firebase/app.ts` and is exposed only through `getDb()`; the typed query/mutation wrappers in `src/lib/queries/` are the call surface for everything else.
+
+The most safety-critical helper is `createMovementAndAdjustItem` — it's the **only** supported way to mutate `RollItem.remainingMeters`. Two concurrent stock adjustments are guarded by a caller-supplied `expectedOldMeters` snapshot inside `runTransaction`; a stale snapshot returns `err('meters-mismatch', …)` and the UI surfaces a "stock changed, refresh" dialog. Don't add convenience setters that bypass this path.
+
+Future ESLint rule (PRJ-842) will enforce the import boundary mechanically. For now, code review enforces it. Tests for the data layer (Vitest setup + happy-path + concurrency) ship in PRJ-841.
+
 ## Local setup
 
 Requires Node 20+ and pnpm 9+.
