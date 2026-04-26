@@ -174,6 +174,13 @@ export async function createStaffUser(
       newUid = cred.user.uid;
       await updateProfile(cred.user, { displayName: params.displayName.trim() });
     } catch (e: unknown) {
+      // If user was created but updateProfile failed, delete orphan before
+      // returning so the admin can retry without hitting email-already-in-use.
+      const signedInUser = secondaryAuth.currentUser;
+      if (signedInUser) {
+        try { await deleteUser(signedInUser); } catch (_) { /* ignore */ }
+      }
+
       // Auth network/timeout errors leave the account state UNKNOWN; admin
       // must verify in Firebase Console before retrying (a blind retry
       // would hit `auth/email-already-in-use` on an orphan).
