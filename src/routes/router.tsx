@@ -9,6 +9,7 @@ import FolderRoute from './folder';
 import DeletedRoute from './deleted';
 import LowStockRoute from './lowstock';
 import NotFoundRoute from './not-found';
+import StaffRoute from './staff';
 
 // Single source of truth for the route tree. Adding a route = add a line here.
 // Paths mirror the URL scheme locked in research/synthesis.md §2 + §3.
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
       { path: 'folders/:id', element: <FolderRoute /> },
       { path: 'deleted', element: <DeletedRoute /> },
       { path: 'lowstock', element: <LowStockRoute /> },
+      { path: 'staff', element: <StaffRoute /> },
       { path: '*', element: <NotFoundRoute /> },
     ],
   },
