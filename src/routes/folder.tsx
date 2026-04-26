@@ -150,6 +150,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
 
   // Firestore effects gate on `authUser !== undefined` — reads launched
   // before auth resolves hit permission-denied and stick.
+  const [retryToken, setRetryToken] = useState(0);
   const [currentFolder, setCurrentFolder] = useState<Folder | null | undefined>(undefined);
   const [currentError, setCurrentError] = useState<string | null>(null);
   useEffect(() => {
@@ -169,7 +170,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
       }
     });
     return () => { cancelled = true; };
-  }, [parentId, authUser]);
+  }, [parentId, authUser, retryToken]);
 
   // Ancestor chips. Per-doc failure → fall back to short ID prefix so
   // the path stays clickable.
@@ -189,12 +190,11 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
       }));
     });
     return () => { cancelled = true; };
-  }, [currentFolder]);
+  }, [currentFolder, retryToken]);
 
   // Live children subscription. Same auth-resolved gate as above.
   const [children, setChildren] = useState<Folder[] | undefined>(undefined);
   const [childrenError, setChildrenError] = useState<string | null>(null);
-  const [retryToken, setRetryToken] = useState(0);
   useEffect(() => {
     if (authUser === undefined) return;
     setChildren(undefined);
