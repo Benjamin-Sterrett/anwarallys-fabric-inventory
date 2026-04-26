@@ -4,9 +4,10 @@
 
 export { err, ok, type Result } from './result';
 export { listFolderChildren, countActiveItemsInSubtree } from './folders';
-export { getItemById } from './items';
+export { getItemById, type GetItemByIdOptions } from './items';
 export {
   createMovementAndAdjustItem,
   listMovementsForItem,
   type AdjustStockParams,
+  type MovementsPage,
 } from './movements';

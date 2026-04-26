@@ -1,5 +1,4 @@
-// Discriminated union for every write/read wrapper. Synthesis §4
-// invariant: "errors never silent." Minimal shape; no third-party dep.
+// Discriminated union — synthesis §4 invariant "errors never silent."
 
 export type Result<T> =
   | { ok: true; data: T }

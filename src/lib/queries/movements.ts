@@ -1,15 +1,12 @@
-// Movements layer — the most safety-critical surface in the app.
-// `createMovementAndAdjustItem` is the ONLY supported way to mutate
-// `RollItem.remainingMeters`. Don't add convenience setters.
+// Movements — safety-critical. `createMovementAndAdjustItem` is the ONLY
+// path that writes `RollItem.remainingMeters`. Don't add convenience
+// setters.
 //
-// Concurrency is optimistic via caller-supplied `expectedOldMeters`. Inside
-// the transaction we `tx.get` the live doc and compare `remainingMeters` to
-// `expectedOldMeters`; mismatch => abort with `meters-mismatch` so the
-// second writer fails fast and UI shows "stock changed, refresh" (PRJ-787).
-//
-// No `increment()`: it would apply a delta on top of whatever's at commit
-// time — wrong behavior. "Set to 90m" must not silently produce 80m when a
-// concurrent edit already moved the value to 90m.
+// Optimistic concurrency: caller passes `expectedOldMeters` (the value
+// the user saw). `tx.get` then compare to the live doc; mismatch =>
+// `meters-mismatch`. No `increment()` — it would apply a delta on top of
+// whatever's at commit time, so "set to 90m" could silently produce 80m
+// when a concurrent edit already moved the value to 90m.
 
 import {
   collection,
@@ -21,18 +18,14 @@ import {
   runTransaction,
   serverTimestamp,
   where,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter, movementConverter } from '@/lib/firebase/converters';
 import type { Movement, MovementReason } from '@/lib/models';
 import { err, ok, type Result } from './result';
 
-/**
- * Inputs for a stock adjustment. `expectedOldMeters` is the
- * optimistic-concurrency guard — pass the value the user saw in the UI.
- * Don't paper over a mismatch by re-reading just before the transaction;
- * that defeats the guard.
- */
+/** `expectedOldMeters` is the concurrency guard — never re-read it. */
 export interface AdjustStockParams {
   itemId: string;
   expectedOldMeters: number;
@@ -61,8 +54,7 @@ export async function createMovementAndAdjustItem(
   if (!db) return err('firestore/no-db', 'Firebase is not configured.');
 
   const itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
-  // Allocate the movement doc-ID locally so the transaction can reference
-  // it without round-tripping. Documented pattern for transactional creates.
+  // Auto-ID allocated locally so the transaction can reference it.
   const movementRef = doc(collection(db, 'movements')).withConverter(
     movementConverter,
   );
@@ -79,8 +71,7 @@ export async function createMovementAndAdjustItem(
 
       const deltaMeters = params.newMeters - liveItem.remainingMeters;
 
-      // Denormalize folder context from the live item — audit trail must
-      // survive later item moves (PRJ-789 history view depends on this).
+      // Denormalize folder context — audit trail survives later item moves.
       const movementPayload = {
         movementId: movementRef.id,
         itemId: params.itemId,
@@ -109,24 +100,30 @@ export async function createMovementAndAdjustItem(
     return ok(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    if (message === ITEM_MISSING) {
-      return err('item-missing', 'The item is missing or has been deleted.');
-    }
-    if (message === METERS_MISMATCH) {
-      return err(
-        'meters-mismatch',
-        'Stock changed in another session. Refresh and try again.',
-      );
-    }
+    if (message === ITEM_MISSING) return err('item-missing', 'The item is missing or has been deleted.');
+    if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
     return err('firestore/transaction-failed', message);
   }
 }
 
-/** Movement history for one item, newest first. Default limit 50. */
+export interface MovementsPage {
+  items: Movement[];
+  /** True when `items.length === pageSize`; caller should fetch the next page. */
+  hasMore: boolean;
+  /** Pass to a future `startAfter` param to fetch the next page. */
+  lastCursor: QueryDocumentSnapshot<Movement> | null;
+}
+
+/**
+ * Movement history, newest first. Caller MUST pass `pageSize` — no
+ * default. Audit-trail invariant: never silently drop older movements.
+ * Single-page only for now; PRJ-789 adds a `startAfter` param that
+ * consumes `lastCursor`. `hasMore === true` means more results exist.
+ */
 export async function listMovementsForItem(
   itemId: string,
-  limit: number = 50,
-): Promise<Result<Movement[]>> {
+  pageSize: number,
+): Promise<Result<MovementsPage>> {
   const db = getDb();
   if (!db) return err('firestore/no-db', 'Firebase is not configured.');
   try {
@@ -134,10 +131,16 @@ export async function listMovementsForItem(
       collection(db, 'movements').withConverter(movementConverter),
       where('itemId', '==', itemId),
       orderBy('at', 'desc'),
-      queryLimit(limit),
+      queryLimit(pageSize),
     );
     const snap = await getDocs(q);
-    return ok(snap.docs.map((d) => d.data()));
+    const items = snap.docs.map((d) => d.data());
+    const lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+    return ok({
+      items,
+      hasMore: snap.docs.length === pageSize,
+      lastCursor: lastDoc,
+    });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown Firestore error.';
     return err('firestore/list-movements-failed', message);

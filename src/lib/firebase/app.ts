@@ -1,14 +1,13 @@
 // Single entry point for Firebase. Import this module FIRST in any module
 // that touches Firestore. Never call `getFirestore()` directly — always
-// use `getDb()`. Future ESLint rule (PRJ-842) enforces this mechanically.
+// use `getDb()`. ESLint rule (PRJ-842) will enforce this mechanically.
 //
 // `initializeFirestore(app, settings)` MUST run before the first
 // `getFirestore(app)` — the latter locks settings to defaults and any
-// subsequent `initializeFirestore` throws `failed-precondition`. We
-// centralize both calls here, in init order, and expose only `getDb()`.
+// later `initializeFirestore` throws `failed-precondition`. Both calls
+// live here so callers can't invert the order.
 //
-// Firebase web config is client-safe; Rules (PRJ-805) are the authz
-// surface. Don't add `firebase-admin` (project invariant: client SDK only).
+// Don't add `firebase-admin` (project invariant: client SDK only).
 
 import {
   initializeApp,
@@ -72,23 +71,27 @@ export function getFirebaseApp(): FirebaseApp | null {
 
 /**
  * The ONLY public Firestore accessor. Returns `null` when config is
- * missing. HMR-safe: catches `failed-precondition` from a re-init and
- * falls back to `getFirestore(app)`.
+ * missing. HMR-safe: detects re-eval via the SDK's app registry BEFORE
+ * attempting `initializeFirestore`, so genuine init failures
+ * (IndexedDB-disabled, storage quota) propagate visibly instead of
+ * silently degrading to memory cache.
  */
 export function getDb(): Firestore | null {
   if (cachedDb) return cachedDb;
+  // Snapshot registry state BEFORE `getFirebaseApp` so we can tell whether
+  // we created the app this lifecycle (fresh tab) or pulled it from the
+  // SDK registry (HMR re-eval — Firestore already initialized).
+  const appExisted = getApps().length > 0;
   const app = getFirebaseApp();
   if (!app) return null;
-  try {
+  if (appExisted) {
+    cachedDb = getFirestore(app);
+  } else {
     cachedDb = initializeFirestore(app, {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
     });
-  } catch {
-    // HMR re-eval: `initializeFirestore` throws `failed-precondition`
-    // because the SDK already initialized Firestore on this app.
-    cachedDb = getFirestore(app);
   }
   return cachedDb;
 }

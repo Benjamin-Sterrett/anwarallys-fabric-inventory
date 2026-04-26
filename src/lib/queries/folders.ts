@@ -1,5 +1,4 @@
-// Folder reads. Both queries filter `deletedAt == null` to skip tombstones
-// and pair with indexes in `firestore.indexes.json`.
+// Folder reads. `deletedAt == null` skips tombstones.
 
 import {
   collection,
@@ -31,10 +30,7 @@ export async function listFolderChildren(parentId: string | null): Promise<Resul
   }
 }
 
-/**
- * Active items in `folderId`'s subtree. `array-contains` against the
- * denormalized `folderAncestors[]` field on `RollItem`.
- */
+/** Active items in `folderId`'s subtree (via denormalized `folderAncestors`). */
 export async function countActiveItemsInSubtree(folderId: string): Promise<Result<number>> {
   const db = getDb();
   if (!db) return err('firestore/no-db', 'Firebase is not configured.');

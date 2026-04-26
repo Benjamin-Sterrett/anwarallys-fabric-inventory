@@ -1,9 +1,7 @@
-// Firestore converters — one per collection. Conventions:
-//   1. Doc-ID field (`folderId`/`itemId`/`movementId`) is NEVER persisted;
-//      `toFirestore` strips it, `fromFirestore` injects it from `snapshot.id`.
-//   2. `toFirestore` accepts `WithFieldValue<T>` so callers can pass
-//      `serverTimestamp()` for timestamp fields.
-// Explicit > clever for the security-critical layer; no generic factory.
+// Firestore converters. Doc-ID is stripped on write, injected from
+// `snapshot.id` on read. `toFirestore` takes `WithFieldValue<T>` so
+// callers can pass `serverTimestamp()`. No generic factory — each
+// converter has slightly different optional-field handling.
 
 import {
   type DocumentData,

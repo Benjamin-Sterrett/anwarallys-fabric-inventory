@@ -1,10 +1,6 @@
-// Firebase Auth scaffold. PRJ-780 ships only the init surface and base
-// helpers; sign-in UX (email/password form, error mapping) belongs to
-// PRJ-781.
-//
-// Persistence: `indexedDBLocalPersistence` first, `browserLocalPersistence`
-// fallback. SDK takes the first supported and auto-migrates. No
-// `popupRedirectResolver` — synthesis §3 forbids redirect providers.
+// Firebase Auth — init surface + base helpers only. Sign-in UX is PRJ-781.
+// Persistence: IndexedDB then localStorage; SDK auto-migrates. No
+// `popupRedirectResolver` (synthesis §3 forbids redirect providers).
 
 import {
   initializeAuth,
@@ -41,13 +37,11 @@ export function getAuth(): Auth | null {
 }
 
 /**
- * Currently signed-in user, or `null`.
- *
- * IMPORTANT early-page-load race: returns `null` immediately after page
- * load before `onAuthStateChanged` fires with the persisted user. Callers
- * that gate writes on auth state (PRJ-781, PRJ-787) MUST gate on
- * `subscribeToAuthState` resolving non-null — never treat a synchronous
- * `null` as "signed out" for write purposes. Safe for optimistic UI hints.
+ * Currently signed-in user, or `null`. Early-page-load race: returns
+ * `null` before `onAuthStateChanged` fires with the persisted user.
+ * Callers gating writes (PRJ-781, PRJ-787) MUST gate on
+ * `subscribeToAuthState` resolving non-null — synchronous `null` is not
+ * "signed out". Safe for optimistic UI hints.
  */
 export function getCurrentUser(): User | null {
   const auth = getAuth();
