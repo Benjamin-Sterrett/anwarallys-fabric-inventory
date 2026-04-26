@@ -101,6 +101,11 @@ function ItemFormPage(props: ItemFormPageProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
 
+  // Cache-backed mount reads (PRJ-893): item-form edits metadata only
+  // (sku, description, supplier, etc.). These fields do not affect stock
+  // correctness, so a briefly stale cache is harmless. Keeping cache-
+  // backed reads preserves offline-friendly UX per the explicit pilot
+  // policy. Safety-critical stock adjustments live in rolls-adjust.tsx.
   useEffect(() => {
     if (authUser === undefined) return;
     let cancelled = false;

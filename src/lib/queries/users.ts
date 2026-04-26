@@ -31,6 +31,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   query,
   serverTimestamp,
   setDoc,
@@ -311,6 +312,71 @@ export async function renameStaffUser(
       updatedBy: adminUid,
     });
     return ok(undefined);
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Same as `listActiveStaff` but bypasses the persistent local cache via
+ * `getDocsFromServer`. Use on safety-critical surfaces (e.g. admin staff
+ * management) where a stale cache could let an admin act on out-of-date
+ * state (e.g. deactivate a user already deactivated by a concurrent admin).
+ * Caller MUST handle `firestore/unavailable` — there is no cache fallback
+ * by design.
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`, `firestore/unknown`.
+ */
+export async function listActiveStaffFromServer(): Promise<Result<User[]>> {
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
+    db = maybeDb;
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const q = query(
+      collection(db, 'users').withConverter(userConverter),
+      where('isActive', '==', true),
+    );
+    const snap = await getDocsFromServer(q);
+    return ok(snap.docs.map((d) => d.data()));
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Same as `listInactiveStaff` but bypasses the persistent local cache via
+ * `getDocsFromServer`. Use on safety-critical admin surfaces where stale
+ * cache could hide a concurrent reactivation/deactivation.
+ * Caller MUST handle `firestore/unavailable` — there is no cache fallback
+ * by design.
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`, `firestore/unknown`.
+ */
+export async function listInactiveStaffFromServer(): Promise<Result<User[]>> {
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
+    db = maybeDb;
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const q = query(
+      collection(db, 'users').withConverter(userConverter),
+      where('isActive', '==', false),
+    );
+    const snap = await getDocsFromServer(q);
+    return ok(snap.docs.map((d) => d.data()));
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
