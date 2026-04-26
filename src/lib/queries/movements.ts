@@ -16,11 +16,13 @@ import {
   runTransaction,
   serverTimestamp,
   where,
+  type DocumentReference,
+  type Firestore,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter, movementConverter } from '@/lib/firebase/converters';
-import type { Movement, MovementReason } from '@/lib/models';
+import type { Movement, MovementReason, RollItem } from '@/lib/models';
 import { err, ok, type Result } from './result';
 
 /** `expectedOldMeters` is the concurrency guard — never re-read it. */
@@ -43,26 +45,44 @@ function isValidMeters(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
 }
 
+function isNonEmpty(s: unknown): s is string {
+  return typeof s === 'string' && s.trim() !== '';
+}
+
 /**
- * Atomically validate, write `Movement`, and update
- * `RollItem.remainingMeters` in one Firestore transaction. Fractional
- * meters are valid (12.5m is a normal cut).
+ * Atomically validate, write `Movement`, update `RollItem.remainingMeters`.
+ * Fractional meters valid (12.5m is normal). Param validation runs BEFORE
+ * I/O; `getDb()` runs inside try so init failures map to
+ * `firestore/init-failed` instead of leaking past the boundary.
  *
- * Errors: `firestore/no-db`, `invalid-meters` (params or live doc corrupt
- * — `NaN` would permanently break `!== expectedOldMeters` and brick the
- * roll), `item-missing`, `meters-mismatch`, `firestore/transaction-failed`.
+ * Errors: `invalid-meters` (params or live doc — `NaN` would brick the
+ * roll), `invalid-actor` (empty UID/name breaks audit attribution),
+ * `firestore/no-db`, `firestore/init-failed`, `item-missing`,
+ * `meters-mismatch`, `firestore/transaction-failed`.
  */
 export async function createMovementAndAdjustItem(
   params: AdjustStockParams,
 ): Promise<Result<{ movementId: string; newMeters: number }>> {
   if (!isValidMeters(params.newMeters)) return err('invalid-meters', 'newMeters must be a finite, non-negative number.');
   if (!isValidMeters(params.expectedOldMeters)) return err('invalid-meters', 'expectedOldMeters must be a finite, non-negative number.');
+  // Attribution invariant — early-page-load auth race (see auth.ts) could
+  // hand callers an empty string; the boundary fails fast so they can't.
+  if (!isNonEmpty(params.actorUid)) return err('invalid-actor', 'actorUid is required and must be non-empty.');
+  if (!isNonEmpty(params.actorName)) return err('invalid-actor', 'actorName is required and must be non-empty.');
 
-  const db = getDb();
-  if (!db) return err('firestore/no-db', 'Firebase is not configured.');
-
-  const itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
-  const movementRef = doc(collection(db, 'movements')).withConverter(movementConverter);
+  // Init phase: getDb() can throw (IndexedDB / storage quota).
+  let db: Firestore;
+  let itemRef: DocumentReference<RollItem>;
+  let movementRef: DocumentReference<Movement>;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
+    db = maybeDb;
+    itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
+    movementRef = doc(collection(db, 'movements')).withConverter(movementConverter);
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+  }
 
   try {
     const result = await runTransaction(db, async (tx) => {
@@ -116,18 +136,19 @@ export interface MovementsPage {
 }
 
 /**
- * Movement history, newest first. Caller MUST pass `pageSize` (no
- * default — audit-trail invariant: never silently truncate). `hasMore`
- * is authoritative: we fetch `pageSize + 1` and trim. Single-page only
- * for now; PRJ-789 adds `startAfter` consuming `lastCursor`.
+ * Movement history, newest first. `pageSize` MUST be a positive integer
+ * (audit-trail invariant: never silently truncate or no-op). `hasMore` is
+ * authoritative — fetch `pageSize + 1` and trim. PRJ-789 adds `startAfter`.
+ * Errors: `invalid-page-size`, `firestore/no-db`, `firestore/init-failed`.
  */
 export async function listMovementsForItem(
   itemId: string,
   pageSize: number,
 ): Promise<Result<MovementsPage>> {
-  const db = getDb();
-  if (!db) return err('firestore/no-db', 'Firebase is not configured.');
+  if (!Number.isInteger(pageSize) || pageSize <= 0) return err('invalid-page-size', 'pageSize must be a positive integer.');
   try {
+    const db = getDb();
+    if (!db) return err('firestore/no-db', 'Firebase is not configured.');
     const q = query(
       collection(db, 'movements').withConverter(movementConverter),
       where('itemId', '==', itemId),
@@ -140,8 +161,7 @@ export async function listMovementsForItem(
     const lastCursor: QueryDocumentSnapshot<Movement> | null =
       hasMore ? (pageDocs[pageDocs.length - 1] ?? null) : null;
     return ok({ items: pageDocs.map((d) => d.data()), hasMore, lastCursor });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown Firestore error.';
-    return err('firestore/list-movements-failed', message);
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
   }
 }

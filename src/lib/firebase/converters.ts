@@ -1,7 +1,6 @@
-// Firestore converters. Doc-ID is stripped on write, injected from
+// Firestore converters. Doc-ID stripped on write, injected from
 // `snapshot.id` on read. `toFirestore` takes `WithFieldValue<T>` so
-// callers can pass `serverTimestamp()`. No generic factory — each
-// converter has slightly different optional-field handling.
+// callers can pass `serverTimestamp()`.
 
 import {
   type DocumentData,
@@ -10,12 +9,7 @@ import {
   type SnapshotOptions,
   type WithFieldValue,
 } from 'firebase/firestore';
-import type {
-  Folder,
-  RollItem,
-  Movement,
-  DeletedRecord,
-} from '@/lib/models';
+import type { Folder, RollItem, Movement, DeletedRecord } from '@/lib/models';
 
 export const folderConverter: FirestoreDataConverter<Folder> = {
   toFirestore(folder: WithFieldValue<Folder>): DocumentData {
@@ -95,8 +89,7 @@ export const movementConverter: FirestoreDataConverter<Movement> = {
 };
 
 export const deletedRecordConverter: FirestoreDataConverter<DeletedRecord> = {
-  // `itemId` is the doc-ID — live item's ID is reused as the tombstone's ID
-  // for 1:1 lookup in PRJ-797 restore.
+  // `itemId` is the doc-ID — reused as tombstone ID for 1:1 PRJ-797 restore.
   toFirestore(record: WithFieldValue<DeletedRecord>): DocumentData {
     const { itemId: _strip, ...payload } = record as DeletedRecord;
     return payload;

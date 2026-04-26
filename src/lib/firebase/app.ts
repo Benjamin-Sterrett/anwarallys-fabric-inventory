@@ -38,12 +38,9 @@ function readConfig(): FirebaseWebConfig | null {
     messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: env.VITE_FIREBASE_APP_ID,
   };
-  const missing = Object.entries(values)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
+  const missing = Object.entries(values).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length > 0) {
-    // CI builds have no .env.local — callers handle null.
-    // eslint-disable-next-line no-console
+    // eslint-disable-next-line no-console -- CI builds have no .env.local; callers handle null.
     console.warn(`[firebase] Missing env vars: ${missing.join(', ')}. Firebase not initialized.`);
     return null;
   }
@@ -74,18 +71,13 @@ export function getDb(): Firestore | null {
   if (!app) return null;
   try {
     cachedDb = initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
   } catch (e: unknown) {
     // `failed-precondition` is the SDK's HMR-re-eval signal. Anything
-    // else (IndexedDB disabled, storage quota) must propagate.
-    if (e instanceof FirebaseError && e.code === 'failed-precondition') {
-      cachedDb = getFirestore(app);
-    } else {
-      throw e;
-    }
+    // else (IndexedDB / storage quota) must propagate.
+    if (e instanceof FirebaseError && e.code === 'failed-precondition') cachedDb = getFirestore(app);
+    else throw e;
   }
   return cachedDb;
 }

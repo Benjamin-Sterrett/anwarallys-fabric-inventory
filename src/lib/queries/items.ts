@@ -17,17 +17,16 @@ export async function getItemById(
   itemId: string,
   options: GetItemByIdOptions = {},
 ): Promise<Result<RollItem | null>> {
-  const db = getDb();
-  if (!db) return err('firestore/no-db', 'Firebase is not configured.');
   try {
+    const db = getDb();
+    if (!db) return err('firestore/no-db', 'Firebase is not configured.');
     const ref = doc(db, 'items', itemId).withConverter(itemConverter);
     const snap = await getDoc(ref);
     if (!snap.exists()) return ok(null);
     const item = snap.data();
     if (!options.includeDeleted && item.deletedAt !== null) return ok(null);
     return ok(item);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown Firestore error.';
-    return err('firestore/get-item-failed', message);
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
   }
 }

@@ -1,6 +1,4 @@
-// Firebase Auth — init surface + base helpers only. Sign-in UX is PRJ-781.
-// Persistence: IndexedDB then localStorage; SDK auto-migrates. No
-// `popupRedirectResolver` (synthesis §3 forbids redirect providers).
+// Firebase Auth — init + base helpers. Sign-in UX is PRJ-781.
 
 import {
   initializeAuth,
@@ -18,20 +16,18 @@ import { getFirebaseApp } from './app';
 let cachedAuth: Auth | null = null;
 
 /**
- * Lazy-init Firebase Auth. Returns `null` when config is missing.
- * HMR-safe: catches `auth/already-initialized` and falls back.
+ * Lazy-init. `null` when unconfigured. HMR-safe (catches
+ * `auth/already-initialized`). Persistence: IndexedDB → localStorage,
+ * SDK auto-migrates. No redirect providers (synthesis §3).
  */
 export function getAuth(): Auth | null {
   if (cachedAuth) return cachedAuth;
   const app = getFirebaseApp();
   if (!app) return null;
   try {
-    cachedAuth = initializeAuth(app, {
-      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-    });
+    cachedAuth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   } catch {
-    // Already initialized on this app instance (HMR or duplicate import).
-    cachedAuth = firebaseGetAuth(app);
+    cachedAuth = firebaseGetAuth(app); // already initialized on this app
   }
   return cachedAuth;
 }
@@ -39,19 +35,16 @@ export function getAuth(): Auth | null {
 /**
  * Currently signed-in user, or `null`. Early-page-load race: returns
  * `null` before `onAuthStateChanged` fires with the persisted user.
- * Callers gating writes (PRJ-781, PRJ-787) MUST gate on
- * `subscribeToAuthState` resolving non-null — synchronous `null` is not
- * "signed out". Safe for optimistic UI hints.
+ * Callers gating writes MUST use `subscribeToAuthState` and wait for a
+ * non-null user — synchronous `null` is not "signed out". Safe for
+ * optimistic UI hints.
  */
 export function getCurrentUser(): User | null {
   const auth = getAuth();
   return auth?.currentUser ?? null;
 }
 
-/**
- * Subscribe to auth state changes. Pass-through to `onAuthStateChanged`.
- * When Firebase isn't configured, emits `null` once and returns a no-op.
- */
+/** Subscribe to auth state. When unconfigured, emits `null` once + no-op unsub. */
 export function subscribeToAuthState(cb: (user: User | null) => void): Unsubscribe {
   const auth = getAuth();
   if (!auth) {
