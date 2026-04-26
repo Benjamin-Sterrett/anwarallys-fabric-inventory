@@ -354,6 +354,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     const freshUser = await getUserByUid(authUser.uid);
     if (!freshUser.ok || !freshUser.data) {
       setSubmitting(false);
+      setConfirmOpen(false);
       setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
       return;
     }
