@@ -1,6 +1,14 @@
 // Firestore converters. Doc-ID stripped on write, injected from
 // `snapshot.id` on read. `toFirestore` takes `WithFieldValue<T>` so
 // callers can pass `serverTimestamp()`.
+//
+// All converters request `serverTimestamps: 'estimate'` so reads of
+// unresolved `serverTimestamp()` fields return a local-time estimate
+// instead of `null` (the SDK default). With `persistentLocalCache`
+// enabled, the local cache returns just-written docs before the server
+// ACK lands; without 'estimate', `Movement.at` / `Folder.createdAt` /
+// etc. would be `null` and `.toDate()` would crash. Once the server
+// ACK arrives, subsequent reads return the canonical Timestamp.
 
 import {
   type DocumentData,
@@ -17,7 +25,7 @@ export const folderConverter: FirestoreDataConverter<Folder> = {
     return payload;
   },
   fromFirestore(snap: QueryDocumentSnapshot, options?: SnapshotOptions): Folder {
-    const d = snap.data(options);
+    const d = snap.data({ ...options, serverTimestamps: 'estimate' });
     return {
       folderId: snap.id,
       name: d.name,
@@ -40,7 +48,7 @@ export const itemConverter: FirestoreDataConverter<RollItem> = {
     return payload;
   },
   fromFirestore(snap: QueryDocumentSnapshot, options?: SnapshotOptions): RollItem {
-    const d = snap.data(options);
+    const d = snap.data({ ...options, serverTimestamps: 'estimate' });
     return {
       itemId: snap.id,
       sku: d.sku,
@@ -70,7 +78,7 @@ export const movementConverter: FirestoreDataConverter<Movement> = {
     return payload;
   },
   fromFirestore(snap: QueryDocumentSnapshot, options?: SnapshotOptions): Movement {
-    const d = snap.data(options);
+    const d = snap.data({ ...options, serverTimestamps: 'estimate' });
     return {
       movementId: snap.id,
       itemId: d.itemId,
@@ -95,7 +103,7 @@ export const deletedRecordConverter: FirestoreDataConverter<DeletedRecord> = {
     return payload;
   },
   fromFirestore(snap: QueryDocumentSnapshot, options?: SnapshotOptions): DeletedRecord {
-    const d = snap.data(options);
+    const d = snap.data({ ...options, serverTimestamps: 'estimate' });
     return {
       itemId: snap.id,
       snapshot: d.snapshot,

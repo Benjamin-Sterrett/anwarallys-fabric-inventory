@@ -6,6 +6,7 @@
 // would apply a delta on top of whatever's at commit time, so "set to
 // 90m" could silently produce 80m on a concurrent edit.
 
+import { FirebaseError } from 'firebase/app';
 import {
   collection,
   doc,
@@ -58,7 +59,9 @@ function isNonEmpty(s: unknown): s is string {
  * Errors: `invalid-meters` (params or live doc — `NaN` would brick the
  * roll), `invalid-actor` (empty UID/name breaks audit attribution),
  * `firestore/no-db`, `firestore/init-failed`, `item-missing`,
- * `meters-mismatch`, `firestore/transaction-failed`.
+ * `meters-mismatch`, `firestore/<FirestoreErrorCode>` (e.g.
+ * `firestore/permission-denied`, `firestore/aborted` for tx contention),
+ * `firestore/transaction-failed` (non-FirebaseError fallback).
  */
 export async function createMovementAndAdjustItem(
   params: AdjustStockParams,
@@ -120,9 +123,15 @@ export async function createMovementAndAdjustItem(
     return ok(result);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    // Inner-tx sentinels are wrapped in `Error`, so check `.message`
+    // BEFORE the FirebaseError instanceof check — they aren't FirebaseErrors.
     if (message === ITEM_MISSING) return err('item-missing', 'The item is missing or has been deleted.');
     if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
     if (message === INVALID_METERS) return err('invalid-meters', 'Live remainingMeters is not a finite, non-negative number.');
+    // Preserve the SDK error code (permission-denied from Security Rules,
+    // failed-precondition from missing index, unavailable when offline,
+    // aborted from tx contention, etc.) so callers can react accurately.
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/transaction-failed', message);
   }
 }
@@ -139,16 +148,27 @@ export interface MovementsPage {
  * Movement history, newest first. `pageSize` MUST be a positive integer
  * (audit-trail invariant: never silently truncate or no-op). `hasMore` is
  * authoritative — fetch `pageSize + 1` and trim. PRJ-789 adds `startAfter`.
- * Errors: `invalid-page-size`, `firestore/no-db`, `firestore/init-failed`.
+ * Errors: `invalid-page-size`, `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>` (e.g. `firestore/permission-denied`,
+ * `firestore/failed-precondition` for missing composite index),
+ * `firestore/unknown`.
  */
 export async function listMovementsForItem(
   itemId: string,
   pageSize: number,
 ): Promise<Result<MovementsPage>> {
   if (!Number.isInteger(pageSize) || pageSize <= 0) return err('invalid-page-size', 'pageSize must be a positive integer.');
+
+  let db: Firestore;
   try {
-    const db = getDb();
-    if (!db) return err('firestore/no-db', 'Firebase is not configured.');
+    const maybeDb = getDb();
+    if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
+    db = maybeDb;
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+  }
+
+  try {
     const q = query(
       collection(db, 'movements').withConverter(movementConverter),
       where('itemId', '==', itemId),
@@ -162,6 +182,7 @@ export async function listMovementsForItem(
       hasMore ? (pageDocs[pageDocs.length - 1] ?? null) : null;
     return ok({ items: pageDocs.map((d) => d.data()), hasMore, lastCursor });
   } catch (e: unknown) {
-    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
   }
 }
