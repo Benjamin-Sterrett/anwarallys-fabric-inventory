@@ -14,6 +14,7 @@ import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
+import { randomUUIDv4 } from '@/lib/util/uuid';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -354,7 +355,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // PRJ-883: pre-generate the correlation id so we can reconcile if
     // the client-side timeout fires before the boundary's success
     // result lands. Fresh per attempt — never replayed across saves.
-    const correlationId = crypto.randomUUID();
+    const correlationId = randomUUIDv4();
     // R3 P2 / lead Codex round 3: anchor the reconcile time-bound to the
     // server-stamped `item.updatedAt` rather than a client wall-clock
     // value (`Timestamp.fromDate(new Date())`). Movement.at is stamped by
@@ -424,6 +425,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
           setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
+          // Lead Codex R5 P2: refresh item from server so item.updatedAt
+          // reflects the just-committed write. The next save uses
+          // item.updatedAt as the reconcile `since` lower bound; without
+          // this refresh, a replayed correlation id from the prior save
+          // would falsely match (its `at` >= stale updatedAt).
+          void reloadItemFromServer();
           setSubmitting(false);
           return;
         }
@@ -460,6 +467,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
+    // Lead Codex R5 P2: see found-path comment. Background refresh so
+    // item.updatedAt reflects the post-commit server state — the next
+    // save's reconcile `since` bound is fresh.
+    void reloadItemFromServer();
     setSubmitting(false);
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
 
@@ -499,7 +510,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // Same in-place update pattern as onConfirm — avoid the unmount race.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setSnack('Undone.');
-  }, [lastMovement, authUser, userDoc, item]);
+    // Lead Codex R5 P2: see onConfirm. Refresh item.updatedAt so the next
+    // save's reconcile `since` bound is fresh post-undo.
+    void reloadItemFromServer();
+  }, [lastMovement, authUser, userDoc, item, reloadItemFromServer]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
     // submitError stays above the loading shell so meters-mismatch/timeout

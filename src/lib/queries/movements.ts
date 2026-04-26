@@ -26,6 +26,7 @@ import {
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter, movementConverter } from '@/lib/firebase/converters';
 import type { Movement, MovementReason, RollItem } from '@/lib/models';
+import { randomUUIDv4 } from '@/lib/util/uuid';
 import { err, ok, type Result } from './result';
 
 /** `expectedOldMeters` is the concurrency guard — never re-read it. */
@@ -119,7 +120,7 @@ export async function createMovementAndAdjustItem(
   if (params.clientCorrelationId !== undefined && !isNonEmpty(params.clientCorrelationId)) {
     return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string when set.');
   }
-  const correlationId = params.clientCorrelationId ?? crypto.randomUUID();
+  const correlationId = params.clientCorrelationId ?? randomUUIDv4();
 
   // Init phase: getDb() can throw (IndexedDB / storage quota).
   let db: Firestore;
