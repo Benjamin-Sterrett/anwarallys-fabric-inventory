@@ -5,6 +5,7 @@ import DashboardRoute from './index';
 import LoginRoute from './login';
 import ItemRoute from './item';
 import ItemNewRoute, { ItemEditRoute } from './item-form';
+import ItemDetailRoute from './item-detail';
 import RollsAdjustRoute from './rolls-adjust';
 import FolderRoute from './folder';
 import DeletedRoute from './deleted';
@@ -39,6 +40,8 @@ export const router = createBrowserRouter([
       // form can derive `folderAncestors` from the parent folder doc.
       // Edit is item-scoped — the form keeps the item's existing folder.
       { path: 'folders/:folderId/items/new', element: <RequireAuth><ItemNewRoute /></RequireAuth> },
+      // PRJ-789: item-detail page hosts Adjust entry, persistent Undo, and movement history.
+      { path: 'items/:itemId', element: <RequireAuth><ItemDetailRoute /></RequireAuth> },
       { path: 'items/:itemId/edit', element: <RequireAuth><ItemEditRoute /></RequireAuth> },
       { path: 'deleted', element: <RequireAuth><DeletedRoute /></RequireAuth> },
       { path: 'lowstock', element: <RequireAuth><LowStockRoute /></RequireAuth> },
