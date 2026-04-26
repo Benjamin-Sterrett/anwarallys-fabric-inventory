@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   // Admin gate (PRJ-856). Compared case-insensitively against the signed-in
   // user's email; see src/lib/auth/isAdmin.ts.
   readonly VITE_ADMIN_EMAIL: string;
+  // Public host for QR code URLs (PRJ-792). Must be short — no scheme prefix.
+  readonly VITE_PUBLIC_HOST: string;
 }
 
 interface ImportMeta {

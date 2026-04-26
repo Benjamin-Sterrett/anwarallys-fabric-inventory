@@ -25,9 +25,11 @@ const SIZE_STYLES: Record<RollLabelSize, React.CSSProperties> = {
   small: { width: '30mm', height: '30mm' },
 };
 
-function buildUrl(itemId: string): string {
-  const host = HOST ?? 'localhost';
-  return `https://${host}/i/${encodeURIComponent(itemId)}`;
+function buildUrl(itemId: string): string | null {
+  if (!HOST || HOST.trim() === '') {
+    return null;
+  }
+  return `https://${HOST}/i/${encodeURIComponent(itemId)}`;
 }
 
 interface ErrorBoundaryState {
@@ -71,6 +73,17 @@ function QrErrorFallback({ size }: { size: RollLabelSize }) {
  */
 export default function RollLabel({ itemId, size = 'default' }: RollLabelProps) {
   const url = useMemo(() => buildUrl(itemId), [itemId]);
+
+  if (!url) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+        style={SIZE_STYLES[size]}
+      >
+        QR host not configured — set VITE_PUBLIC_HOST
+      </div>
+    );
+  }
 
   if (!itemId || itemId.trim() === '') {
     return (
