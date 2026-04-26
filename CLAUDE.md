@@ -8,10 +8,11 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - `linear issue start PRJ-##` — start working on an issue
 
 ## Current Status
-- **Phase:** Wave 1 — Scaffold merged, auto-deploy live; ready to start schema (PRJ-779)
-- **Last:** **PRJ-835** in flight — GitHub Actions auto-deploy to Cloudflare Pages (replaces native CF Pages OAuth path; client has no GitHub). **PRJ-778 MERGED** previously (PR #1, squash `2b5906d3`) — full scaffold on main.
-- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + 13 ticket descriptions updated + repo public + CI green + scaffold live + GitHub Actions auto-deploy.
-- **Next:** (1) Client WhatsApp answers to `research/client-questions.md` (staff nicknames, label sizes). (2) PRJ-779 (Firestore schema, foundational). (3) PRJ-804 validation checklist (physical checks now that deployed skeleton is live).
+- **Phase:** Wave 1 — Schema + auto-deploy shipped; next is Firebase data layer (PRJ-780)
+- **Last:** **PRJ-779 MERGED** (PR #3, squash `1767d78`) — Firestore schema types in `src/lib/models/index.ts`. **PRJ-835 MERGED** (PR #2, squash `b7c299a`) — GitHub Actions auto-deploy to Cloudflare Pages.
+- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + 13 ticket descriptions updated + repo public + CI green + scaffold live + auto-deploy + **schema shipped**.
+- **Next:** (1) **PRJ-780** Firebase data-access boundary (Claude, consumes new types). (2) **PRJ-805** Security Rules (Claude, can run parallel with PRJ-780). (3) Client WhatsApp answers to `research/client-questions.md` (staff nicknames, label sizes). (4) PRJ-804 validation checklist (physical checks).
+- **Open architectural debate:** PRJ-840 — read/write model split. Held unified shape for v1; revisit if pilot surfaces real misuse.
 - **Handoff:** See `.handoff.md` for full session details + dependency order
 
 ## Project Management
@@ -127,4 +128,4 @@ IDENTIFY → DISCOVER → IMPLEMENT → VERIFY → DELIVER → PR-REVIEW → HAN
 2. Update "Current Status" block above.
 3. Commit any uncommitted work.
 
-**Last Updated:** 2026-04-23 (PRJ-778 merged)
+**Last Updated:** 2026-04-26 (PRJ-779 + PRJ-835 merged)
