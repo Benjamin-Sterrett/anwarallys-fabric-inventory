@@ -11,8 +11,8 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { createMovementAndAdjustItem, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
-import type { MovementReason, RollItem, User } from '@/lib/models';
+import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
+import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -22,6 +22,12 @@ const NOTE_MAX = 200;
 const NOTE_MIN_OTHER = 3;
 const SAVE_TIMEOUT_MS = 10_000;
 const UNDO_WINDOW_MS = 15_000;
+// PRJ-883: timeout reconciliation. After a `Promise.race` timeout fires,
+// the underlying transaction may still be in flight server-side. Poll
+// `/movements` for the correlation id; first probe is immediate, then
+// one retry after a grace period for in-flight commits to land.
+const RECONCILE_RETRY_DELAY_MS = 2500;
+const RECONCILE_MAX_ATTEMPTS = 2;
 
 const REASONS: ReadonlyArray<{ value: MovementReason; label: string }> = [
   { value: 'sold', label: 'Sold' }, { value: 'cut', label: 'Cut' },
@@ -61,6 +67,7 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'meters-mismatch': return 'Stock changed in another session. Refresh and retry.';
     case 'stale-reversal': return 'Another adjustment ran after this one. Refresh and retry.';
     case 'invalid-reversal': return 'Could not record this undo. Refresh and try again.';
+    case 'invalid-correlation-id': return 'Could not record this save. Refresh and try again.';
     case 'invalid-meters': return 'The meters value is not valid. Check the number and try again.';
     case 'zero-delta': return 'No change to save.';
     case 'invalid-actor': return 'You are not signed in. Sign in and try again.';
@@ -70,6 +77,31 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'timeout': return 'Save took too long. Check your internet and retry.';
     default: return `${fallback} (${code})`;
   }
+}
+
+// PRJ-883: Reconcile a timed-out save against the authoritative server
+// state. Polls `findMovementByCorrelationId` up to `RECONCILE_MAX_ATTEMPTS`
+// times, with `RECONCILE_RETRY_DELAY_MS` between probes, to absorb the
+// window where a transaction commit lands AFTER the client-side timeout
+// fires. Returns the found Movement, `null` for confirmed-not-committed,
+// or 'inconclusive' if every probe errored (caller falls back to
+// "verify on-hand" — never auto-success on a query failure).
+async function reconcileTimedOutSave(
+  itemId: string,
+  clientCorrelationId: string,
+): Promise<{ kind: 'found'; movement: Movement } | { kind: 'not-committed' } | { kind: 'inconclusive' }> {
+  let sawError = false;
+  for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
+    }
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId);
+    if (!r.ok) { sawError = true; continue; }
+    if (r.data !== null) return { kind: 'found', movement: r.data };
+  }
+  // All attempts returned `null` (no error) → confirmed not committed.
+  // Any attempt errored AND none found → inconclusive (degraded mode).
+  return sawError ? { kind: 'inconclusive' } : { kind: 'not-committed' };
 }
 
 function useOnline(): boolean {
@@ -282,6 +314,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
       return;
     }
     setUserDoc(freshUser.data);
+    // PRJ-883: pre-generate the correlation id so we can reconcile if
+    // the client-side timeout fires before the boundary's success
+    // result lands. Fresh per attempt — never replayed across saves.
+    const correlationId = crypto.randomUUID();
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -292,6 +328,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       note: reason === 'other' ? noteTrimmed : null,
       actorUid: authUser.uid,
       actorName: freshUser.data.displayName,
+      clientCorrelationId: correlationId,
     };
     let timer: number | null = null;
     const timeoutPromise = new Promise<{ ok: false; error: { code: string; message: string } }>((resolve) => {
@@ -301,14 +338,39 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (timer !== null) window.clearTimeout(timer);
     setSubmitting(false); setConfirmOpen(false);
     if (!r.ok) {
-      // Timeout: do NOT infer success (R3 P2). Use server-authoritative read
-      // (R5 P1) so a stale cache doesn't push the operator into double-applying
-      // an adjustment that already landed. R6 P1 / PRJ-883: getDocFromServer
-      // is authoritative-as-of-read-time, but a still-in-flight transaction
-      // can land AFTER this read. The "refresh the page" cue is a partial
-      // mitigation; the durable fix requires a clientCorrelationId on
-      // Movement (schema change — tracked in PRJ-883).
+      // PRJ-883: timeout reconciliation. The client-side `Promise.race`
+      // timeout fires before the server has acknowledged commit, but the
+      // transaction may still be in flight. Query `/movements` for the
+      // correlation id we wrote into `params.clientCorrelationId`:
+      // - found: authoritative success — restore the snackbar + Undo.
+      // - not-committed (every probe returned null cleanly): safe to
+      //   retry without double-application risk.
+      // - inconclusive (probe(s) errored — e.g. composite index still
+      //   building, network blip): fall back to the conservative
+      //   "verify on-hand" message; never auto-success on a query
+      //   error. Operator agency preserved.
       if (r.error.code === 'timeout') {
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId);
+        if (outcome.kind === 'found') {
+          // Late-success path — restore the 15-sec Undo window. Use the
+          // server-authoritative movement values (oldMeters/newMeters/
+          // movementId), NOT the client request, so a query hit can
+          // never mislead the Undo math.
+          const m = outcome.movement;
+          setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
+          setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
+          setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
+          setMetersInput(''); setReason(null); setNote('');
+          return;
+        }
+        if (outcome.kind === 'not-committed') {
+          setMetersInput('');
+          setSubmitError('Save did not go through. Safe to retry.');
+          void reloadItemFromServer();
+          return;
+        }
+        // outcome.kind === 'inconclusive' — degraded mode (e.g. index
+        // building, transient network failure on the reconcile probe).
         setMetersInput('');
         setSubmitError('Save took too long. The change may or may not have gone through. Refresh the page to see the latest stock value before adjusting again.');
         void reloadItemFromServer();
