@@ -392,7 +392,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
     });
     const r = await Promise.race([createMovementAndAdjustItem(params), timeoutPromise]);
     if (timer !== null) window.clearTimeout(timer);
-    setSubmitting(false); setConfirmOpen(false);
+    // Lead Codex R4 P1: keep `submitting` true through reconcile. Closing the
+    // confirm modal early is fine (it's just chrome); but flipping submitting
+    // to false here re-enabled Save/Undo during the 0–2.5s timeout reconcile
+    // poll, defeating this PR's double-apply protection. Defer to terminal
+    // branches: success, non-timeout error, found, inconclusive.
+    setConfirmOpen(false);
     if (!r.ok) {
       // PRJ-883: timeout reconciliation. The client-side `Promise.race`
       // timeout fires before the server has acknowledged commit, but the
@@ -419,6 +424,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
           setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
+          setSubmitting(false);
           return;
         }
         // outcome.kind === 'inconclusive' — could still be in flight
@@ -433,6 +439,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
         // auto-recovery, NO Undo affordance, NO "safe to retry" claim.
         setInconclusivePending(true);
         setSubmitError('Save took too long. The change may or may not have gone through. Reload this page to see the actual on-hand value before making any further changes.');
+        setSubmitting(false);
         return;
       }
       // Concurrent edit (R3 P1) — same server-read for the same reason (R5 P1).
@@ -440,9 +447,11 @@ function AdjustPage({ itemId }: { itemId: string }) {
         setMetersInput('');
         setSubmitError('Stock changed in another session. Check the new on-hand and re-enter your adjustment.');
         void reloadItemFromServer();
+        setSubmitting(false);
         return;
       }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
+      setSubmitting(false);
       return;
     }
     // In-place setItem from authoritative boundary return — no refetch on
@@ -451,6 +460,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
+    setSubmitting(false);
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
 
   const onUndo = useCallback(async () => {
