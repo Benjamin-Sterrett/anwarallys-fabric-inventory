@@ -59,6 +59,8 @@ function mapErrorCode(code: string, fallback: string): string {
   switch (code) {
     case 'item-missing': return 'This roll is missing or has been deleted. Refresh and try again.';
     case 'meters-mismatch': return 'Stock changed in another session. Refresh and retry.';
+    case 'stale-reversal': return 'Another adjustment ran after this one. Refresh and retry.';
+    case 'invalid-reversal': return 'Could not record this undo. Refresh and try again.';
     case 'invalid-meters': return 'The meters value is not valid. Check the number and try again.';
     case 'zero-delta': return 'No change to save.';
     case 'invalid-actor': return 'You are not signed in. Sign in and try again.';
@@ -349,9 +351,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
       expectedOldMeters: item.remainingMeters,
       newMeters: lastMovement.oldMeters,
       reason: 'correction',
-      note: `Undo of ${lastMovement.movementId}`,
+      // PRJ-890: typed back-reference replaces the prior locale-fragile
+      // `note: "Undo of <id>"` convention. `note` stays user-typed
+      // free-form (null on undo — staff didn't type anything).
+      note: null,
       actorUid: authUser.uid,
       actorName: freshUser.data.displayName,
+      reversesMovementId: lastMovement.movementId,
     });
     setSubmitting(false); setLastMovement(null);
     if (!r.ok) {

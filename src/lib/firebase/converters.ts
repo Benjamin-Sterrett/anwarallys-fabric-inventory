@@ -93,6 +93,7 @@ export const movementConverter: FirestoreDataConverter<Movement> = {
       actorUid: d.actorUid,
       actorName: d.actorName,
       at: d.at,
+      reversesMovementId: d.reversesMovementId ?? null,
     };
   },
 };

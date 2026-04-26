@@ -35,12 +35,20 @@ export interface AdjustStockParams {
   note: string | null;
   actorUid: string;
   actorName: string;
+  /**
+   * Typed back-reference for the Undo path (PRJ-890). Set to the reversed
+   * movement's id when this write is an undo; omit (or pass `null`) for
+   * normal stock changes. Boundary defaults to `null` so callers that
+   * don't undo stay rules-conformant.
+   */
+  reversesMovementId?: string | null;
 }
 
 // Sentinels thrown inside the transaction; outer catch maps them.
 const ITEM_MISSING = 'item-missing';
 const METERS_MISMATCH = 'meters-mismatch';
 const INVALID_METERS = 'invalid-meters';
+const STALE_REVERSAL = 'stale-reversal';
 
 function isValidMeters(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -58,7 +66,10 @@ function isNonEmpty(s: unknown): s is string {
  *
  * Errors: `invalid-meters` (params or live doc — `NaN` would brick the
  * roll), `invalid-actor` (empty UID/name breaks audit attribution),
- * `firestore/no-db`, `firestore/init-failed`, `item-missing`,
+ * `invalid-reversal` (PRJ-890 — back-reference set but malformed/wrong
+ * reason), `stale-reversal` (PRJ-890 — undo target is no longer the
+ * item's last movement), `firestore/no-db`, `firestore/init-failed`,
+ * `item-missing`,
  * `meters-mismatch`, `firestore/<FirestoreErrorCode>` (e.g.
  * `firestore/permission-denied`, `firestore/aborted` for tx contention),
  * `firestore/transaction-failed` (non-FirebaseError fallback).
@@ -76,6 +87,14 @@ export async function createMovementAndAdjustItem(
   // hand callers an empty string; the boundary fails fast so they can't.
   if (!isNonEmpty(params.actorUid)) return err('invalid-actor', 'actorUid is required and must be non-empty.');
   if (!isNonEmpty(params.actorName)) return err('invalid-actor', 'actorName is required and must be non-empty.');
+  // PRJ-890: when this write is a reversal, the back-reference must be a
+  // non-empty string and the reason must be 'correction' (mirrors rules).
+  // Boundary fail-fast keeps malformed inputs from racing into a tx that
+  // Rules will reject anyway, and matches the audit-trail invariant.
+  if (params.reversesMovementId != null) {
+    if (!isNonEmpty(params.reversesMovementId)) return err('invalid-reversal', 'reversesMovementId must be a non-empty string when set.');
+    if (params.reason !== 'correction') return err('invalid-reversal', "reversesMovementId requires reason 'correction'.");
+  }
 
   // Init phase: getDb() can throw (IndexedDB / storage quota).
   let db: Firestore;
@@ -100,6 +119,15 @@ export async function createMovementAndAdjustItem(
       // Live-doc corruption recovery — NaN would brick the roll.
       if (!isValidMeters(liveItem.remainingMeters)) throw new Error(INVALID_METERS);
       if (liveItem.remainingMeters !== params.expectedOldMeters) throw new Error(METERS_MISMATCH);
+      // PRJ-890: Undo can only target the item's CURRENT last movement.
+      // If another adjustment has landed since the user opened the screen,
+      // the undo affordance is stale — surface that as its own error so
+      // the UI can prompt for refresh rather than the more generic
+      // `meters-mismatch` (which can also fire for plain stock races).
+      if (params.reversesMovementId != null
+          && liveItem.lastMovementId !== params.reversesMovementId) {
+        throw new Error(STALE_REVERSAL);
+      }
 
       const deltaMeters = params.newMeters - liveItem.remainingMeters;
 
@@ -117,6 +145,7 @@ export async function createMovementAndAdjustItem(
         actorUid: params.actorUid,
         actorName: params.actorName,
         at: serverTimestamp(),
+        reversesMovementId: params.reversesMovementId ?? null,
       };
 
       // `lastMovementId` is the rules-verifiable cross-reference: PRJ-805
@@ -141,6 +170,7 @@ export async function createMovementAndAdjustItem(
     if (message === ITEM_MISSING) return err('item-missing', 'The item is missing or has been deleted.');
     if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
     if (message === INVALID_METERS) return err('invalid-meters', 'Live remainingMeters is not a finite, non-negative number.');
+    if (message === STALE_REVERSAL) return err('stale-reversal', 'Another adjustment ran after this one. Refresh and try again.');
     // Preserve the SDK error code (permission-denied from Security Rules,
     // failed-precondition from missing index, unavailable when offline,
     // aborted from tx contention, etc.) so callers can react accurately.
