@@ -114,6 +114,22 @@ First build (scaffold only, no Firebase wiring yet):
 
 Well under the Cloudflare Pages 25 MiB Worker-bundle limit (which doesn't apply to static SPAs, but we're tracking it anyway). Firebase client SDK dominates the JS chunk at this stage; feature-ticket bundles will grow modestly from here.
 
+## Firestore Security Rules
+
+`firestore.rules` is the entire authorization surface — there is no server, no Admin SDK, no Cloud Functions. PRJ-805 ships the full rules; trade-offs and helper conventions are documented inline at the top of the file.
+
+**Bootstrap (one-time, before deploy):**
+
+1. Open the Firebase Console → Firestore.
+2. Create doc `/config/admin` with a single string field `adminEmail` set to the project admin's email. The `isAdminUser()` rule helper reads this on every `/users/{uid}` write. The admin's Firebase Auth account MUST have `email_verified == true` — Auth rules require it. Confirm via the Firebase Console → Authentication → Users tab; if `Email verified` is `false`, send the verification email via the SDK or the Console.
+3. Create a `/users/{uid}` doc for EVERY authenticated user (including the admin) with `isActive: true` and a non-empty `displayName`. Inventory rules gate on `isActiveStaff()` (checks `isActive == true`), and movement creates require `actorName == /users/{auth.uid}.displayName` (PRJ-859 anti-spoof). Until a user has a `/users` doc, they cannot write inventory or movements. The admin can self-provision via PRJ-856's `/staff` page once it ships, or seed manually now.
+
+**v1 does not support folder deletion (PRJ-863, supersedes PRJ-860):** Firestore Security Rules cannot iterate `folderAncestors[]` (no list-iteration primitive in Rules expressions), so they cannot reliably reject item writes inside descendants of a deleted ancestor. v1 therefore disables in-app folder soft-delete entirely — folders are rename-only.
+
+DO NOT use the Firebase Console to soft-delete or hard-delete non-leaf folders. Doing so leaves descendant subfolders and items active and writable (Rules only validate the DIRECT parent folder, not the full ancestor chain), which is exactly the orphan-corruption state we're avoiding. The only safe manual cleanup is hard-deleting an empty leaf folder (no descendants of any kind). The proper subtree-aware folder lifecycle lands in PRJ-796 (Wave 5) with a `getCountFromServer`-based UI check before delete.
+
+**Manual red-team validation:** see `firestore-rules-validation.md` for the emulator test plan. Run before promoting rules to production. Automated coverage lands with PRJ-841.
+
 ## Project docs
 
 - `CLAUDE.md` — project status, locked decisions, wave plan, dev workflow

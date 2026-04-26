@@ -1,11 +1,422 @@
 rules_version = '2';
 
-// DENY-ALL SKELETON — replace with real rules in PRJ-805.
-// Every read and write path is explicitly denied until the real Security
-// Rules land. This prevents accidental open-by-default behavior while the
-// scaffold is deployed.
+// Firestore Rules — Anwarallys Fabric Inventory (PRJ-805). Client-only
+// SPA; this file is THE entire authz surface. See README + firestore-rules-
+// validation.md for bootstrap and red-team plan.
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Auth gate. Bootstrap-only — most paths use `isActiveStaff()`.
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    // Inventory gate: signed in AND `/users/{auth.uid}.isActive == true`.
+    // Deactivating a user via PRJ-856 flips this to false and revokes
+    // write access immediately. One doc read per evaluation.
+    function isActiveStaff() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    function adminEmail() {
+      return get(/databases/$(database)/documents/config/admin).data.adminEmail;
+    }
+
+    // Admin gate. Does NOT require `isActiveStaff()` so admins can
+    // self-provision before any /users docs exist. `email_verified` is
+    // required because Firebase Auth's email field is otherwise mutable.
+    function isAdminUser() {
+      return isAuthed()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == adminEmail();
+    }
+
+    // Finite non-negative. NaN >= 0 is false, so NaN is filtered.
+    // `< 1e15` rejects Infinity (a hostile client could otherwise poison
+    // stock math forever — Infinity passes `is number`, `>= 0`, and any
+    // arithmetic). 1e15 is far above any legitimate fabric stock value
+    // (rolls top at ~1000m); pricing is bounded similarly.
+    function isFiniteNonNeg(v) {
+      return v is number && v >= 0 && v < 1e15;
+    }
+
+    function isNonEmptyString(v) {
+      return v is string && v.size() > 0;
+    }
+
+    function isStringOrNull(v) {
+      return v == null || v is string;
+    }
+
+    function isNumberOrNull(v) {
+      return v == null || (v is number && v >= 0 && v < 1e15);
+    }
+
+    function isTimestampOrNull(v) {
+      return v == null || v is timestamp;
+    }
+
+    // The seven canonical movement reasons. Mirrors `MovementReason` enum
+    // in `src/lib/models/index.ts`. Drift here = rules reject valid writes.
+    function isValidReason(s) {
+      return s in ['sold', 'cut', 'damage', 'return', 'correction', 'receive', 'other'];
+    }
+
+    // Field-level immutability check. Used on update rules to forbid
+    // mutation of `createdAt`, `createdBy`, `initialMeters`, etc.
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // Server-stamped timestamp. `serverTimestamp()` resolves to `request.time`.
+    function isServerTime(t) {
+      return t == request.time;
+    }
+
+    // /folders — tree nodes. v1: rename-only. Both client soft-delete
+    // and hard-delete are blocked; PRJ-796 ships subtree-aware delete.
+    match /folders/{folderId} {
+      allow read: if isActiveStaff();
+
+      // Topology: root folders have parentId==null, ancestors==[], depth==0.
+      // Non-root folders MUST point to an existing, non-deleted parent and
+      // derive ancestors/depth from it. Prevents cycles and broken paths.
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.name)
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.deletedAt == null
+        && request.resource.data.deletedBy == null
+        && (
+          // Root folder.
+          (request.resource.data.parentId == null
+            && request.resource.data.ancestors == []
+            && request.resource.data.depth == 0)
+          // Non-root: parent must exist, be active, and dictate ancestors/depth.
+          || (request.resource.data.parentId is string
+            && exists(/databases/$(database)/documents/folders/$(request.resource.data.parentId))
+            && get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.deletedAt == null
+            && request.resource.data.ancestors == get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.ancestors.concat([request.resource.data.parentId])
+            && request.resource.data.depth == get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.depth + 1)
+        );
+
+      // Updates: `createdAt`, `createdBy`, `parentId`, `ancestors`, `depth`
+      // are immutable. Folders in v1 are RENAME-ONLY — `deletedAt` and
+      // `deletedBy` are also unchanged on every update.
+      //
+      // PRJ-863: in-app folder soft-delete is blocked entirely in v1.
+      // Firestore Security Rules cannot iterate `folderAncestors[]` (no
+      // list-iteration primitive), so we cannot reject item writes inside
+      // descendants of a soft-deleted ancestor. Items.update only checks
+      // the DIRECT parent folder, leaving grandchildren and below freely
+      // writable. Disabling folder soft-delete in Rules forecloses this
+      // entire class of orphan-corruption bug. Folder lifecycle (delete,
+      // cascade, restore with subtree-empty checks) lands in PRJ-796
+      // (Wave 5) with the proper `getCountFromServer`-based UI flow.
+      // Manual cleanup limited to hard-deleting empty leaf folders only;
+      // see README "Firestore Security Rules" section. PRJ-863 supersedes
+      // the round-2 PRJ-860 deferral.
+      // Folders that are already soft-deleted (e.g. via Firebase Console
+      // override) are fully immutable from the client. No renames, no
+      // restores. PRJ-796 will introduce the proper restore flow.
+      allow update: if isActiveStaff()
+        && resource.data.deletedAt == null
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && unchanged('parentId')
+        && unchanged('ancestors')
+        && unchanged('depth')
+        && unchanged('deletedAt')
+        && unchanged('deletedBy')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.name);
+
+      // Hard delete is forbidden in v1. Soft-delete is also blocked here
+      // (see comment block above). PRJ-796 ships the real flow.
+      allow delete: if false;
+    }
+
+    // /items — one roll = one item. remainingMeters mutated only via the
+    // runTransaction in src/lib/queries/movements.ts (paired movement +
+    // lastMovementId cross-ref).
+    match /items/{itemId} {
+      allow read: if isActiveStaff();
+
+      // Create: `lastMovementId` MUST be null. The initial `remainingMeters`
+      // is the original roll length set by the creator; movements track
+      // subsequent changes only.
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.sku)
+        && request.resource.data.description is string
+        && isNonEmptyString(request.resource.data.folderId)
+        // folderAncestors must be derived from the live folder doc (which
+        // must exist and not be deleted). Forecloses stale or forged
+        // subtree-membership values that would corrupt folder queries.
+        && exists(/databases/$(database)/documents/folders/$(request.resource.data.folderId))
+        && get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.deletedAt == null
+        && request.resource.data.folderAncestors == get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.ancestors.concat([request.resource.data.folderId])
+        && isFiniteNonNeg(request.resource.data.remainingMeters)
+        && isFiniteNonNeg(request.resource.data.initialMeters)
+        // Opening stock invariant: a fresh roll starts at its full length.
+        && request.resource.data.remainingMeters == request.resource.data.initialMeters
+        && isFiniteNonNeg(request.resource.data.minimumMeters)
+        && request.resource.data.lastMovementId == null
+        && isStringOrNull(request.resource.data.photoUrl)
+        && isStringOrNull(request.resource.data.supplier)
+        && isNumberOrNull(request.resource.data.price)
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.deletedAt == null
+        && request.resource.data.deletedBy == null
+        && request.resource.data.deleteReason == null;
+
+      // Update: `createdAt`, `createdBy`, `initialMeters` immutable.
+      // Stock-mutation guards (A/B below) and soft-delete-pairing guard.
+      // Stock changes are FORBIDDEN on already soft-deleted items: a
+      // restore must come first via the same path that nulls `deletedAt`.
+      allow update: if isActiveStaff()
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && unchanged('initialMeters')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.sku)
+        && request.resource.data.description is string
+        && isNonEmptyString(request.resource.data.folderId)
+        // folderId + folderAncestors must always agree with a live folder.
+        // Folder moves: same canonical-derivation rule as on create.
+        && exists(/databases/$(database)/documents/folders/$(request.resource.data.folderId))
+        && get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.deletedAt == null
+        && request.resource.data.folderAncestors == get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.ancestors.concat([request.resource.data.folderId])
+        && isFiniteNonNeg(request.resource.data.remainingMeters)
+        && isFiniteNonNeg(request.resource.data.minimumMeters)
+        && isStringOrNull(request.resource.data.photoUrl)
+        && isStringOrNull(request.resource.data.supplier)
+        && isNumberOrNull(request.resource.data.price)
+        && isTimestampOrNull(request.resource.data.deletedAt)
+        && isStringOrNull(request.resource.data.deletedBy)
+        && isStringOrNull(request.resource.data.deleteReason)
+        // Stock-mutation cross-reference (Guards A and B above).
+        && (
+          // Guard A: stock changed — verify paired movement created in
+          // this same commit. Stock changes are FORBIDDEN on already
+          // soft-deleted items (`resource.data.deletedAt == null`).
+          (request.resource.data.remainingMeters != resource.data.remainingMeters
+            && resource.data.deletedAt == null
+            && request.resource.data.lastMovementId is string
+            && request.resource.data.lastMovementId != resource.data.lastMovementId
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.itemId == itemId
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.oldMeters == resource.data.remainingMeters
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.newMeters == request.resource.data.remainingMeters
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.at == request.time)
+          // Guard B: stock unchanged — lastMovementId must be unchanged too.
+          || (request.resource.data.remainingMeters == resource.data.remainingMeters
+            && unchanged('lastMovementId'))
+        )
+        // Soft-delete-pairing + server-time guard + while-deleted-immutable.
+        // Restore does NOT recreate from snapshot (per PRJ-779), so any
+        // edit made while deleted would survive restore — a hostile staff
+        // member could rename to mask theft, then wait for restore. Lock
+        // every other field on transitions 2 and 3.
+        && (
+          // Transition 1: no delete-state change. Item is currently active
+          // (resource.data.deletedAt == null); normal edits allowed.
+          (resource.data.deletedAt == null
+            && unchanged('deletedAt') && unchanged('deletedBy') && unchanged('deleteReason'))
+          // Transition 2: active → deleted. Lock every other field.
+          || (resource.data.deletedAt == null
+            && request.resource.data.deletedAt == request.time
+            && request.resource.data.deletedBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedAt == request.time
+            && unchanged('sku') && unchanged('description') && unchanged('folderId')
+            && unchanged('folderAncestors') && unchanged('remainingMeters')
+            && unchanged('minimumMeters') && unchanged('photoUrl')
+            && unchanged('supplier') && unchanged('price')
+            && unchanged('lastMovementId'))
+          // Transition 3: deleted → restored. Lock every other field too.
+          // PRJ-862: restore window is anchored to `items.deletedAt`
+          // (server-stamped, trusted). Allowed if `request.time` is
+          // within 7 days of `deletedAt`. We do NOT also require the
+          // tombstone to exist — that would make the restore window
+          // sensitive to TTL-purge timing on a client-supplied
+          // `expireAt` whose lower bound has a 5-minute clock-skew
+          // allowance (firestore.rules /deletedRecords create rule).
+          // We DO re-verify the parent folder is still alive: if a
+          // Console operator deleted the folder during the 7d window,
+          // restore is blocked so we never reactivate an item under a
+          // missing or deleted folder (PRJ-863 alignment).
+          || (resource.data.deletedAt != null
+            && request.resource.data.deletedAt == null
+            && request.resource.data.deletedBy == null
+            && request.resource.data.deleteReason == null
+            && (request.time.toMillis() - resource.data.deletedAt.toMillis()) <= 7 * 24 * 60 * 60 * 1000
+            && exists(/databases/$(database)/documents/folders/$(resource.data.folderId))
+            && get(/databases/$(database)/documents/folders/$(resource.data.folderId)).data.deletedAt == null
+            && unchanged('sku') && unchanged('description') && unchanged('folderId')
+            && unchanged('folderAncestors') && unchanged('remainingMeters')
+            && unchanged('minimumMeters') && unchanged('photoUrl')
+            && unchanged('supplier') && unchanged('price')
+            && unchanged('lastMovementId'))
+        );
+
+      // Hard delete is forbidden. Use soft-delete + /deletedRecords tombstone.
+      allow delete: if false;
+    }
+
+    // /movements — append-only audit log. Cross-validated via get (pre)
+    // and getAfter (post) on the matching items doc.
+    match /movements/{movementId} {
+      allow read: if isActiveStaff();
+
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.itemId)
+        && isNonEmptyString(request.resource.data.folderIdAtTime)
+        && request.resource.data.folderAncestorsAtTime is list
+        && isFiniteNonNeg(request.resource.data.oldMeters)
+        && isFiniteNonNeg(request.resource.data.newMeters)
+        && request.resource.data.deltaMeters is number
+        // Canonical invariant: delta == new - old. Rejects forged audit math.
+        && request.resource.data.deltaMeters == request.resource.data.newMeters - request.resource.data.oldMeters
+        && isValidReason(request.resource.data.reason)
+        && isStringOrNull(request.resource.data.note)
+        // Impersonation guard: actor MUST be the caller, and actorName
+        // MUST match the caller's /users/{uid}.displayName (PRJ-859) so a
+        // staff member cannot forge a colleague's name into the audit
+        // log. The non-empty-string check guards against a malformed
+        // bootstrap doc with a blank/non-string `displayName` (Console
+        // writes bypass the /users rules and could otherwise let a blank
+        // actorName through).
+        && request.resource.data.actorUid == request.auth.uid
+        && isNonEmptyString(request.resource.data.actorName)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isNonEmptyString(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName)
+        && request.resource.data.actorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName
+        && isServerTime(request.resource.data.at)
+        // Pre-state cross-check: live items doc exists, not soft-deleted,
+        // matches oldMeters AND folder context (no forged location in audit).
+        && exists(/databases/$(database)/documents/items/$(request.resource.data.itemId))
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.deletedAt == null
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.remainingMeters == request.resource.data.oldMeters
+        && request.resource.data.folderIdAtTime == get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.folderId
+        && request.resource.data.folderAncestorsAtTime == get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.folderAncestors
+        // Post-state cross-check: the items doc must reflect this movement's
+        // newMeters AND its `lastMovementId` must point back to this doc,
+        // which ties the two writes together permanently.
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.remainingMeters == request.resource.data.newMeters
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.lastMovementId == movementId
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.updatedAt == request.time;
+
+      // Append-only. The audit trail is sacred.
+      allow update, delete: if false;
+    }
+
+    // /deletedRecords — trash-bin tombstones. TTL on expireAt purges 7d.
+    // Snapshot fully cross-checked vs items doc; expireAt bound `[7d, 7d+15m]`.
+    match /deletedRecords/{itemId} {
+      allow read: if isActiveStaff();
+
+      allow create: if isActiveStaff()
+        && request.resource.data.snapshot is map
+        && request.resource.data.deletedAt == request.time
+        && request.resource.data.deletedBy == request.auth.uid
+        && isStringOrNull(request.resource.data.deleteReason)
+        && request.resource.data.expireAt is timestamp
+        && isNonEmptyString(request.resource.data.folderIdAtDelete)
+        && request.resource.data.folderAncestorsAtDelete is list
+        // Retention bounds are tight to the 7-day restore window:
+        // floor exactly 7d, ceiling 7d + 15min. Trash-bin UI in PRJ-797
+        // can therefore use tombstone existence as a proxy for
+        // restorability without surfacing entries that are no longer
+        // restorable. The 15-min upper margin absorbs TTL-purge
+        // imprecision (TTL fires within hours of expireAt typically,
+        // not exact). The PRJ-796 soft-delete data boundary MUST
+        // compute `expireAt = device_now + 7d + safety_buffer` (≤ 15
+        // min) to land inside this band — a slow client clock computing
+        // exactly 7d from local time will fail the floor.
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) >= 7 * 24 * 60 * 60 * 1000
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) <= 7 * 24 * 60 * 60 * 1000 + 15 * 60 * 1000
+        // Snapshot integrity: every field of the snapshot must mirror the
+        // pre-commit items doc. The snapshot is the recovery payload if
+        // the live doc is ever missing — forging it would corrupt restore.
+        && exists(/databases/$(database)/documents/items/$(itemId))
+        // Snapshot must mirror EVERY persisted field of the live items doc.
+        // Recovery payload in PRJ-797 reads this verbatim.
+        && request.resource.data.snapshot.itemId == itemId
+        && request.resource.data.snapshot.sku == get(/databases/$(database)/documents/items/$(itemId)).data.sku
+        && request.resource.data.snapshot.description == get(/databases/$(database)/documents/items/$(itemId)).data.description
+        && request.resource.data.snapshot.folderId == get(/databases/$(database)/documents/items/$(itemId)).data.folderId
+        && request.resource.data.snapshot.folderAncestors == get(/databases/$(database)/documents/items/$(itemId)).data.folderAncestors
+        && request.resource.data.snapshot.remainingMeters == get(/databases/$(database)/documents/items/$(itemId)).data.remainingMeters
+        && request.resource.data.snapshot.initialMeters == get(/databases/$(database)/documents/items/$(itemId)).data.initialMeters
+        && request.resource.data.snapshot.minimumMeters == get(/databases/$(database)/documents/items/$(itemId)).data.minimumMeters
+        && request.resource.data.snapshot.photoUrl == get(/databases/$(database)/documents/items/$(itemId)).data.photoUrl
+        && request.resource.data.snapshot.supplier == get(/databases/$(database)/documents/items/$(itemId)).data.supplier
+        && request.resource.data.snapshot.price == get(/databases/$(database)/documents/items/$(itemId)).data.price
+        && request.resource.data.snapshot.lastMovementId == get(/databases/$(database)/documents/items/$(itemId)).data.lastMovementId
+        && request.resource.data.snapshot.createdAt == get(/databases/$(database)/documents/items/$(itemId)).data.createdAt
+        && request.resource.data.snapshot.updatedAt == get(/databases/$(database)/documents/items/$(itemId)).data.updatedAt
+        && request.resource.data.snapshot.createdBy == get(/databases/$(database)/documents/items/$(itemId)).data.createdBy
+        && request.resource.data.snapshot.updatedBy == get(/databases/$(database)/documents/items/$(itemId)).data.updatedBy
+        && request.resource.data.folderIdAtDelete == get(/databases/$(database)/documents/items/$(itemId)).data.folderId
+        && request.resource.data.folderAncestorsAtDelete == get(/databases/$(database)/documents/items/$(itemId)).data.folderAncestors
+        // Items doc must reflect the soft-delete in this same commit
+        // (server-stamped deletedAt by the items.update rule).
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedAt == request.time
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedBy == request.auth.uid;
+
+      // Tombstones are immutable. TTL purges; no client deletes.
+      allow update, delete: if false;
+    }
+
+    // /users — staff profile docs (PRJ-856). Writes admin-only.
+    match /users/{uid} {
+      // PRJ-861: non-admin staff can only read their OWN /users doc.
+      // movement-history UI reads actorName from the movement doc itself
+      // (already denormalized per the schema), and the displayName check
+      // on movement create runs server-side via Rules `get()` which has
+      // privileged read regardless of this rule. Admins can read any
+      // user (Staff page in PRJ-856). Listing collection is admin-only.
+      allow get: if isAdminUser() || (isActiveStaff() && uid == request.auth.uid);
+      allow list: if isAdminUser();
+
+      allow create: if isAdminUser()
+        && isNonEmptyString(request.resource.data.email)
+        && isNonEmptyString(request.resource.data.displayName)
+        && request.resource.data.isActive is bool
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid;
+
+      allow update: if isAdminUser()
+        && unchanged('email')
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.displayName)
+        && request.resource.data.isActive is bool;
+
+      allow delete: if isAdminUser();
+    }
+
+    // /config — admin-email lookup target. Read-only from clients;
+    // /config/admin seeded once via Firebase Console.
+    match /config/{document} {
+      allow read: if isAuthed();
+      allow create, update, delete: if false;
+    }
+
+    // Catch-all: explicit deny-by-default.
     match /{document=**} {
       allow read, write: if false;
     }

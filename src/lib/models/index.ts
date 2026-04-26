@@ -75,7 +75,8 @@ export interface Folder {
   updatedAt: ServerTimestamp;
   createdBy: string;
   updatedBy: string;
-  deletedAt: Timestamp | null;
+  /** Server-stamped on soft-delete by Rules (PRJ-805). */
+  deletedAt: ServerTimestamp | null;
   deletedBy: string | null;
 }
 
@@ -94,6 +95,15 @@ export interface RollItem {
    * `runTransaction()` that also creates the matching Movement doc (PRJ-787).
    */
   remainingMeters: number;
+  /**
+   * Cross-reference to the last `/movements/{id}` doc that adjusted
+   * `remainingMeters`. Set to the new movement's auto-id by the
+   * `runTransaction` in `createMovementAndAdjustItem`. `null` until the
+   * first stock change. Security Rules use this id to verify (via
+   * `getAfter()`) that any change to `remainingMeters` is paired with
+   * a real audit entry written in the same commit (PRJ-805).
+   */
+  lastMovementId: string | null;
   /** Original roll length. IMMUTABLE after creation. */
   initialMeters: number;
   /** Threshold for low-stock UI; see PRJ-798. Schema-level override hook. */
@@ -105,7 +115,9 @@ export interface RollItem {
   updatedAt: ServerTimestamp;
   createdBy: string;
   updatedBy: string;
-  deletedAt: Timestamp | null;
+  // Stamped via `serverTimestamp()` on soft-delete so rules can enforce
+  // `deletedAt == request.time` (PRJ-805). `Timestamp` on read.
+  deletedAt: ServerTimestamp | null;
   deletedBy: string | null;
   deleteReason: string | null;
 }
@@ -160,9 +172,18 @@ export type RollItemSnapshot = Omit<
 export interface DeletedRecord {
   itemId: string;
   snapshot: RollItemSnapshot;
-  deletedAt: Timestamp;
+  // Server-stamped on tombstone create — Rules enforce
+  // `deletedAt == request.time` so a custom client cannot extend or
+  // shrink the trash retention window (PRJ-805).
+  deletedAt: ServerTimestamp;
   deletedBy: string;
   deleteReason: string | null;
+  // Concrete future timestamp set by the client. Rules bound it to
+  // `[7 days, 7 days + 15 minutes]` from `request.time` (PRJ-805).
+  // The PRJ-796 soft-delete data boundary must compute `expireAt =
+  // device_now + 7d + safety_buffer (≤ 15 min)` to land inside this
+  // band — a slow-client device computing exactly 7d from local time
+  // will fail the lower bound.
   expireAt: Timestamp;
   folderIdAtDelete: string;
   folderAncestorsAtDelete: string[];
