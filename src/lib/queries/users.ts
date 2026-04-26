@@ -24,6 +24,7 @@ import {
   deleteUser,
   inMemoryPersistence,
   initializeAuth,
+  updateProfile,
 } from 'firebase/auth';
 import {
   collection,
@@ -171,6 +172,7 @@ export async function createStaffUser(
         params.password,
       );
       newUid = cred.user.uid;
+      await updateProfile(cred.user, { displayName: params.displayName.trim() });
     } catch (e: unknown) {
       // Auth network/timeout errors leave the account state UNKNOWN; admin
       // must verify in Firebase Console before retrying (a blind retry
@@ -275,6 +277,9 @@ export async function renameStaffUser(
 
   try {
     const ref = doc(db, 'users', uid).withConverter(userConverter);
+    // Auth displayName is intentionally NOT updated here: the Firebase client
+    // SDK cannot update another user's Auth profile. AuthBar uses Firestore
+    // `/users/{uid}.displayName` as the canonical source.
     await updateDoc(ref, {
       displayName: newDisplayName.trim(),
       updatedAt: serverTimestamp(),
