@@ -1,16 +1,23 @@
+// Single Firebase entry point. Use `getDb()` — never `getFirestore()`
+// directly (PRJ-842 will enforce). `initializeFirestore` MUST run before
+// the first `getFirestore(app)` (the latter locks settings to defaults
+// and a later `initializeFirestore` throws `failed-precondition`); both
+// live here so callers can't invert the order. No `firebase-admin`.
+
 import {
   initializeApp,
   getApp,
   getApps,
+  FirebaseError,
   type FirebaseApp,
 } from 'firebase/app';
-
-// Firebase app boundary. Single source of truth for `initializeApp`.
-// Full Firestore + Auth wiring (persistentLocalCache, persistentMultipleTabManager,
-// initializeAuth w/ indexedDBLocalPersistence) lands in PRJ-780 and PRJ-781.
-//
-// IMPORTANT: Firebase web config IS client-safe. Rules (PRJ-805) are the authz
-// surface. See README "Firebase config is public" for context.
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from 'firebase/firestore';
 
 interface FirebaseWebConfig {
   apiKey: string;
@@ -31,35 +38,48 @@ function readConfig(): FirebaseWebConfig | null {
     messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: env.VITE_FIREBASE_APP_ID,
   };
-  const missing = Object.entries(values)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
+  const missing = Object.entries(values).filter(([, v]) => !v).map(([k]) => k);
   if (missing.length > 0) {
-    // Don't throw — CI builds have no .env.local. Log once, hand back null,
-    // and let callers (PRJ-780+) decide how to surface the missing-config
-    // state in-app. Scaffold routes do not touch Firebase yet.
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[firebase] Missing env vars: ${missing.join(', ')}. Firebase not initialized.`,
-    );
+    // eslint-disable-next-line no-console -- CI builds have no .env.local; callers handle null.
+    console.warn(`[firebase] Missing env vars: ${missing.join(', ')}. Firebase not initialized.`);
     return null;
   }
   return values as FirebaseWebConfig;
 }
 
 let cachedApp: FirebaseApp | null = null;
+let cachedDb: Firestore | null = null;
 
 export function getFirebaseApp(): FirebaseApp | null {
   if (cachedApp) return cachedApp;
   const config = readConfig();
   if (!config) return null;
-  // HMR-safe: under Vite HMR this module can be re-evaluated, which resets
-  // `cachedApp` to null. Calling `initializeApp` again on the default app
-  // throws `FirebaseError: app/duplicate-app`. Check the Firebase SDK's own
-  // registry (survives module reload) and reuse the existing default app
-  // when present.
+  // HMR-safe: SDK registry survives module reload.
   cachedApp = getApps().length > 0 ? getApp() : initializeApp(config);
   return cachedApp;
+}
+
+/**
+ * The ONLY public Firestore accessor. `null` when config is missing.
+ * Catches the SDK's `failed-precondition` (HMR re-eval) and only that —
+ * IndexedDB / storage-quota errors propagate so configuration problems
+ * surface instead of silently degrading to memory cache.
+ */
+export function getDb(): Firestore | null {
+  if (cachedDb) return cachedDb;
+  const app = getFirebaseApp();
+  if (!app) return null;
+  try {
+    cachedDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch (e: unknown) {
+    // `failed-precondition` is the SDK's HMR-re-eval signal. Anything
+    // else (IndexedDB / storage quota) must propagate.
+    if (e instanceof FirebaseError && e.code === 'failed-precondition') cachedDb = getFirestore(app);
+    else throw e;
+  }
+  return cachedDb;
 }
 
 // Named export kept for future modules that want the app eagerly.
