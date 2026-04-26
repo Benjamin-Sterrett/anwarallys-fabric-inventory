@@ -35,8 +35,12 @@ service cloud.firestore {
     }
 
     // Finite non-negative. NaN >= 0 is false, so NaN is filtered.
+    // `< 1e15` rejects Infinity (a hostile client could otherwise poison
+    // stock math forever — Infinity passes `is number`, `>= 0`, and any
+    // arithmetic). 1e15 is far above any legitimate fabric stock value
+    // (rolls top at ~1000m); pricing is bounded similarly.
     function isFiniteNonNeg(v) {
-      return v is number && v >= 0;
+      return v is number && v >= 0 && v < 1e15;
     }
 
     function isNonEmptyString(v) {
@@ -48,7 +52,7 @@ service cloud.firestore {
     }
 
     function isNumberOrNull(v) {
-      return v == null || (v is number && v >= 0);
+      return v == null || (v is number && v >= 0 && v < 1e15);
     }
 
     function isTimestampOrNull(v) {
@@ -113,17 +117,24 @@ service cloud.firestore {
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.updatedBy == request.auth.uid
         && isNonEmptyString(request.resource.data.name)
-        // Delete-state transitions mirror the item rule. Restore (deleted
-        // → active) on a non-root folder requires the parent chain to
-        // still be active so we never reactivate under a deleted ancestor.
+        // Delete-state transitions mirror the item rule. Renames are
+        // forbidden while soft-deleted (would survive restore — same
+        // attack as PRJ-858 on items). Restore on a non-root folder
+        // requires the parent chain to still be active.
         && (
-          (unchanged('deletedAt') && unchanged('deletedBy'))
+          // Transition 1: no delete-state change, item is active. Renames OK.
+          (resource.data.deletedAt == null
+            && unchanged('deletedAt') && unchanged('deletedBy'))
+          // Transition 2: active → deleted. Lock name.
           || (resource.data.deletedAt == null
             && request.resource.data.deletedAt == request.time
-            && request.resource.data.deletedBy == request.auth.uid)
+            && request.resource.data.deletedBy == request.auth.uid
+            && unchanged('name'))
+          // Transition 3: deleted → restored. Lock name; parent must still be active.
           || (resource.data.deletedAt != null
             && request.resource.data.deletedAt == null
             && request.resource.data.deletedBy == null
+            && unchanged('name')
             && (resource.data.parentId == null
               || (exists(/databases/$(database)/documents/folders/$(resource.data.parentId))
                 && get(/databases/$(database)/documents/folders/$(resource.data.parentId)).data.deletedAt == null)))
@@ -212,28 +223,37 @@ service cloud.firestore {
           || (request.resource.data.remainingMeters == resource.data.remainingMeters
             && unchanged('lastMovementId'))
         )
-        // Soft-delete-pairing + server-time guard. Three valid transitions:
-        //   1. No delete-state change (deletedAt unchanged, deletedBy unchanged).
-        //   2. Active → deleted: deletedAt MUST equal `request.time` (server-stamped),
-        //      deletedBy MUST equal `request.auth.uid`, AND a /deletedRecords
-        //      tombstone must land in this same commit with matching fields.
-        //   3. Deleted → restored: deletedAt = null, deletedBy = null. The
-        //      tombstone stays in /deletedRecords (TTL still purges it; restore
-        //      relies on the live items doc going non-deleted).
+        // Soft-delete-pairing + server-time guard + while-deleted-immutable.
+        // Restore does NOT recreate from snapshot (per PRJ-779), so any
+        // edit made while deleted would survive restore — a hostile staff
+        // member could rename to mask theft, then wait for restore. Lock
+        // every other field on transitions 2 and 3.
         && (
-          // Transition 1: no delete-state change.
-          (unchanged('deletedAt') && unchanged('deletedBy') && unchanged('deleteReason'))
-          // Transition 2: active → deleted.
+          // Transition 1: no delete-state change. Item is currently active
+          // (resource.data.deletedAt == null); normal edits allowed.
+          (resource.data.deletedAt == null
+            && unchanged('deletedAt') && unchanged('deletedBy') && unchanged('deleteReason'))
+          // Transition 2: active → deleted. Lock every other field.
           || (resource.data.deletedAt == null
             && request.resource.data.deletedAt == request.time
             && request.resource.data.deletedBy == request.auth.uid
             && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedBy == request.auth.uid
-            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedAt == request.time)
-          // Transition 3: deleted → restored.
+            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedAt == request.time
+            && unchanged('sku') && unchanged('description') && unchanged('folderId')
+            && unchanged('folderAncestors') && unchanged('remainingMeters')
+            && unchanged('minimumMeters') && unchanged('photoUrl')
+            && unchanged('supplier') && unchanged('price')
+            && unchanged('lastMovementId'))
+          // Transition 3: deleted → restored. Lock every other field too.
           || (resource.data.deletedAt != null
             && request.resource.data.deletedAt == null
             && request.resource.data.deletedBy == null
-            && request.resource.data.deleteReason == null)
+            && request.resource.data.deleteReason == null
+            && unchanged('sku') && unchanged('description') && unchanged('folderId')
+            && unchanged('folderAncestors') && unchanged('remainingMeters')
+            && unchanged('minimumMeters') && unchanged('photoUrl')
+            && unchanged('supplier') && unchanged('price')
+            && unchanged('lastMovementId'))
         );
 
       // Hard delete is forbidden. Use soft-delete + /deletedRecords tombstone.
@@ -256,9 +276,18 @@ service cloud.firestore {
         && request.resource.data.deltaMeters == request.resource.data.newMeters - request.resource.data.oldMeters
         && isValidReason(request.resource.data.reason)
         && isStringOrNull(request.resource.data.note)
-        // Impersonation guard: the actor MUST be the caller.
+        // Impersonation guard: actor MUST be the caller, and actorName
+        // MUST match the caller's /users/{uid}.displayName (PRJ-859) so a
+        // staff member cannot forge a colleague's name into the audit
+        // log. The non-empty-string check guards against a malformed
+        // bootstrap doc with a blank/non-string `displayName` (Console
+        // writes bypass the /users rules and could otherwise let a blank
+        // actorName through).
         && request.resource.data.actorUid == request.auth.uid
         && isNonEmptyString(request.resource.data.actorName)
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && isNonEmptyString(get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName)
+        && request.resource.data.actorName == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.displayName
         && isServerTime(request.resource.data.at)
         // Pre-state cross-check: live items doc exists, not soft-deleted,
         // matches oldMeters AND folder context (no forged location in audit).

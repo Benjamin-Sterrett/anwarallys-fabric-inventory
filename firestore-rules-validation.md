@@ -56,6 +56,10 @@ Run scenarios via the Emulator UI Rules Playground or `@firebase/rules-unit-test
 | 22 | Tombstone with `expireAt` 30 days out, OR `snapshot.sku` not matching items.sku | Rejected (retention bound + snapshot integrity) | _pending_ |
 | 23 | Stock change (items.update remainingMeters OR /movements create) on `deletedAt != null` item | Rejected (no stock on deleted) | _pending_ |
 | 24 | Admin with `email_verified: false` creates `/users/{uid}` | Rejected | _pending_ |
+| 25 | Items create with `remainingMeters: Infinity` (PRJ-857) | Rejected (`< 1e15` bound) | _pending_ |
+| 26 | Items update on a soft-deleted item changing `sku` (PRJ-858) | Rejected (only restore allowed) | _pending_ |
+| 27 | Folder update renaming a soft-deleted folder | Rejected (PRJ-858 mirror) | _pending_ |
+| 28 | Movement create with `actorName` ≠ caller's `displayName` (PRJ-859) | Rejected (anti-spoof) | _pending_ |
 
 ## Atomic stock-write enforcement
 
@@ -83,6 +87,7 @@ attributable audit row.
 
 ## Sign-off
 
-- [ ] Scenarios 1–26 verified against emulator.
-- [ ] `/config/admin` seeded; one `/users/{uid}` with `isActive: true` exists.
+- [ ] Scenarios verified against emulator.
+- [ ] `/config/admin` seeded.
+- [ ] EVERY authenticated user (including admin if they make inventory/movement writes) has a `/users/{uid}` doc with `isActive: true` AND non-empty `displayName`. Movements require `actorName` to match `displayName` (PRJ-859); inventory writes require `isActive: true` (isActiveStaff()).
 - [ ] Rules deployed: `firebase deploy --only firestore:rules`.
