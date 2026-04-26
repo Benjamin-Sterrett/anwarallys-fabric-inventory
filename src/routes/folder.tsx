@@ -359,7 +359,8 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
             <ul className="space-y-2">
               {items.map((it) => (
                 <li key={it.itemId}>
-                  <Link to={`/items/${it.itemId}/edit`}
+                  {/* PRJ-789: item rows tap into the detail page (Adjust + history); /edit is reachable via the "Edit metadata" action there. */}
+                  <Link to={`/items/${it.itemId}`}
                     className="flex min-h-12 items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 hover:border-gray-300">
                     <span className="text-base font-medium text-gray-900">{it.sku}</span>
                     <span className="ml-3 text-xs text-gray-600">{it.remainingMeters} m</span>
