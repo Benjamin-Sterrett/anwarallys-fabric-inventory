@@ -1,11 +1,370 @@
 rules_version = '2';
 
-// DENY-ALL SKELETON — replace with real rules in PRJ-805.
-// Every read and write path is explicitly denied until the real Security
-// Rules land. This prevents accidental open-by-default behavior while the
-// scaffold is deployed.
+// Firestore Rules — Anwarallys Fabric Inventory (PRJ-805). Client-only
+// SPA; this file is THE entire authz surface. See README + firestore-rules-
+// validation.md for bootstrap and red-team plan.
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Auth gate. Bootstrap-only — most paths use `isActiveStaff()`.
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    // Inventory gate: signed in AND `/users/{auth.uid}.isActive == true`.
+    // Deactivating a user via PRJ-856 flips this to false and revokes
+    // write access immediately. One doc read per evaluation.
+    function isActiveStaff() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    function adminEmail() {
+      return get(/databases/$(database)/documents/config/admin).data.adminEmail;
+    }
+
+    // Admin gate. Does NOT require `isActiveStaff()` so admins can
+    // self-provision before any /users docs exist. `email_verified` is
+    // required because Firebase Auth's email field is otherwise mutable.
+    function isAdminUser() {
+      return isAuthed()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == adminEmail();
+    }
+
+    // Finite non-negative. NaN >= 0 is false, so NaN is filtered.
+    function isFiniteNonNeg(v) {
+      return v is number && v >= 0;
+    }
+
+    function isNonEmptyString(v) {
+      return v is string && v.size() > 0;
+    }
+
+    function isStringOrNull(v) {
+      return v == null || v is string;
+    }
+
+    function isNumberOrNull(v) {
+      return v == null || (v is number && v >= 0);
+    }
+
+    function isTimestampOrNull(v) {
+      return v == null || v is timestamp;
+    }
+
+    // The seven canonical movement reasons. Mirrors `MovementReason` enum
+    // in `src/lib/models/index.ts`. Drift here = rules reject valid writes.
+    function isValidReason(s) {
+      return s in ['sold', 'cut', 'damage', 'return', 'correction', 'receive', 'other'];
+    }
+
+    // Field-level immutability check. Used on update rules to forbid
+    // mutation of `createdAt`, `createdBy`, `initialMeters`, etc.
+    function unchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // Server-stamped timestamp. `serverTimestamp()` resolves to `request.time`.
+    function isServerTime(t) {
+      return t == request.time;
+    }
+
+    // /folders — tree nodes. Soft-delete only; hard delete forbidden.
+    match /folders/{folderId} {
+      allow read: if isActiveStaff();
+
+      // Topology: root folders have parentId==null, ancestors==[], depth==0.
+      // Non-root folders MUST point to an existing, non-deleted parent and
+      // derive ancestors/depth from it. Prevents cycles and broken paths.
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.name)
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.deletedAt == null
+        && request.resource.data.deletedBy == null
+        && (
+          // Root folder.
+          (request.resource.data.parentId == null
+            && request.resource.data.ancestors == []
+            && request.resource.data.depth == 0)
+          // Non-root: parent must exist, be active, and dictate ancestors/depth.
+          || (request.resource.data.parentId is string
+            && exists(/databases/$(database)/documents/folders/$(request.resource.data.parentId))
+            && get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.deletedAt == null
+            && request.resource.data.ancestors == get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.ancestors.concat([request.resource.data.parentId])
+            && request.resource.data.depth == get(/databases/$(database)/documents/folders/$(request.resource.data.parentId)).data.depth + 1)
+        );
+
+      // Updates: `createdAt`, `createdBy`, `parentId`, `ancestors`, `depth`
+      // are immutable. Renames change `name` + `updatedAt`/`updatedBy`.
+      // Soft-delete and restore flow `deletedAt` and `deletedBy` between
+      // null and Timestamp/string values.
+      allow update: if isActiveStaff()
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && unchanged('parentId')
+        && unchanged('ancestors')
+        && unchanged('depth')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.name)
+        // Delete-state transitions mirror the item rule. Restore (deleted
+        // → active) on a non-root folder requires the parent chain to
+        // still be active so we never reactivate under a deleted ancestor.
+        && (
+          (unchanged('deletedAt') && unchanged('deletedBy'))
+          || (resource.data.deletedAt == null
+            && request.resource.data.deletedAt == request.time
+            && request.resource.data.deletedBy == request.auth.uid)
+          || (resource.data.deletedAt != null
+            && request.resource.data.deletedAt == null
+            && request.resource.data.deletedBy == null
+            && (resource.data.parentId == null
+              || (exists(/databases/$(database)/documents/folders/$(resource.data.parentId))
+                && get(/databases/$(database)/documents/folders/$(resource.data.parentId)).data.deletedAt == null)))
+        );
+
+      // Hard delete is forbidden. Use soft-delete via `deletedAt`.
+      allow delete: if false;
+    }
+
+    // /items — one roll = one item. remainingMeters mutated only via the
+    // runTransaction in src/lib/queries/movements.ts (paired movement +
+    // lastMovementId cross-ref).
+    match /items/{itemId} {
+      allow read: if isActiveStaff();
+
+      // Create: `lastMovementId` MUST be null. The initial `remainingMeters`
+      // is the original roll length set by the creator; movements track
+      // subsequent changes only.
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.sku)
+        && request.resource.data.description is string
+        && isNonEmptyString(request.resource.data.folderId)
+        // folderAncestors must be derived from the live folder doc (which
+        // must exist and not be deleted). Forecloses stale or forged
+        // subtree-membership values that would corrupt folder queries.
+        && exists(/databases/$(database)/documents/folders/$(request.resource.data.folderId))
+        && get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.deletedAt == null
+        && request.resource.data.folderAncestors == get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.ancestors.concat([request.resource.data.folderId])
+        && isFiniteNonNeg(request.resource.data.remainingMeters)
+        && isFiniteNonNeg(request.resource.data.initialMeters)
+        // Opening stock invariant: a fresh roll starts at its full length.
+        && request.resource.data.remainingMeters == request.resource.data.initialMeters
+        && isFiniteNonNeg(request.resource.data.minimumMeters)
+        && request.resource.data.lastMovementId == null
+        && isStringOrNull(request.resource.data.photoUrl)
+        && isStringOrNull(request.resource.data.supplier)
+        && isNumberOrNull(request.resource.data.price)
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.deletedAt == null
+        && request.resource.data.deletedBy == null
+        && request.resource.data.deleteReason == null;
+
+      // Update: `createdAt`, `createdBy`, `initialMeters` immutable.
+      // Stock-mutation guards (A/B below) and soft-delete-pairing guard.
+      // Stock changes are FORBIDDEN on already soft-deleted items: a
+      // restore must come first via the same path that nulls `deletedAt`.
+      allow update: if isActiveStaff()
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && unchanged('initialMeters')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.sku)
+        && request.resource.data.description is string
+        && isNonEmptyString(request.resource.data.folderId)
+        // folderId + folderAncestors must always agree with a live folder.
+        // Folder moves: same canonical-derivation rule as on create.
+        && exists(/databases/$(database)/documents/folders/$(request.resource.data.folderId))
+        && get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.deletedAt == null
+        && request.resource.data.folderAncestors == get(/databases/$(database)/documents/folders/$(request.resource.data.folderId)).data.ancestors.concat([request.resource.data.folderId])
+        && isFiniteNonNeg(request.resource.data.remainingMeters)
+        && isFiniteNonNeg(request.resource.data.minimumMeters)
+        && isStringOrNull(request.resource.data.photoUrl)
+        && isStringOrNull(request.resource.data.supplier)
+        && isNumberOrNull(request.resource.data.price)
+        && isTimestampOrNull(request.resource.data.deletedAt)
+        && isStringOrNull(request.resource.data.deletedBy)
+        && isStringOrNull(request.resource.data.deleteReason)
+        // Stock-mutation cross-reference (Guards A and B above).
+        && (
+          // Guard A: stock changed — verify paired movement created in
+          // this same commit. Stock changes are FORBIDDEN on already
+          // soft-deleted items (`resource.data.deletedAt == null`).
+          (request.resource.data.remainingMeters != resource.data.remainingMeters
+            && resource.data.deletedAt == null
+            && request.resource.data.lastMovementId is string
+            && request.resource.data.lastMovementId != resource.data.lastMovementId
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.itemId == itemId
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.oldMeters == resource.data.remainingMeters
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.newMeters == request.resource.data.remainingMeters
+            && getAfter(/databases/$(database)/documents/movements/$(request.resource.data.lastMovementId)).data.at == request.time)
+          // Guard B: stock unchanged — lastMovementId must be unchanged too.
+          || (request.resource.data.remainingMeters == resource.data.remainingMeters
+            && unchanged('lastMovementId'))
+        )
+        // Soft-delete-pairing + server-time guard. Three valid transitions:
+        //   1. No delete-state change (deletedAt unchanged, deletedBy unchanged).
+        //   2. Active → deleted: deletedAt MUST equal `request.time` (server-stamped),
+        //      deletedBy MUST equal `request.auth.uid`, AND a /deletedRecords
+        //      tombstone must land in this same commit with matching fields.
+        //   3. Deleted → restored: deletedAt = null, deletedBy = null. The
+        //      tombstone stays in /deletedRecords (TTL still purges it; restore
+        //      relies on the live items doc going non-deleted).
+        && (
+          // Transition 1: no delete-state change.
+          (unchanged('deletedAt') && unchanged('deletedBy') && unchanged('deleteReason'))
+          // Transition 2: active → deleted.
+          || (resource.data.deletedAt == null
+            && request.resource.data.deletedAt == request.time
+            && request.resource.data.deletedBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedBy == request.auth.uid
+            && getAfter(/databases/$(database)/documents/deletedRecords/$(itemId)).data.deletedAt == request.time)
+          // Transition 3: deleted → restored.
+          || (resource.data.deletedAt != null
+            && request.resource.data.deletedAt == null
+            && request.resource.data.deletedBy == null
+            && request.resource.data.deleteReason == null)
+        );
+
+      // Hard delete is forbidden. Use soft-delete + /deletedRecords tombstone.
+      allow delete: if false;
+    }
+
+    // /movements — append-only audit log. Cross-validated via get (pre)
+    // and getAfter (post) on the matching items doc.
+    match /movements/{movementId} {
+      allow read: if isActiveStaff();
+
+      allow create: if isActiveStaff()
+        && isNonEmptyString(request.resource.data.itemId)
+        && isNonEmptyString(request.resource.data.folderIdAtTime)
+        && request.resource.data.folderAncestorsAtTime is list
+        && isFiniteNonNeg(request.resource.data.oldMeters)
+        && isFiniteNonNeg(request.resource.data.newMeters)
+        && request.resource.data.deltaMeters is number
+        // Canonical invariant: delta == new - old. Rejects forged audit math.
+        && request.resource.data.deltaMeters == request.resource.data.newMeters - request.resource.data.oldMeters
+        && isValidReason(request.resource.data.reason)
+        && isStringOrNull(request.resource.data.note)
+        // Impersonation guard: the actor MUST be the caller.
+        && request.resource.data.actorUid == request.auth.uid
+        && isNonEmptyString(request.resource.data.actorName)
+        && isServerTime(request.resource.data.at)
+        // Pre-state cross-check: live items doc exists, not soft-deleted,
+        // matches oldMeters AND folder context (no forged location in audit).
+        && exists(/databases/$(database)/documents/items/$(request.resource.data.itemId))
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.deletedAt == null
+        && get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.remainingMeters == request.resource.data.oldMeters
+        && request.resource.data.folderIdAtTime == get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.folderId
+        && request.resource.data.folderAncestorsAtTime == get(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.folderAncestors
+        // Post-state cross-check: the items doc must reflect this movement's
+        // newMeters AND its `lastMovementId` must point back to this doc,
+        // which ties the two writes together permanently.
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.remainingMeters == request.resource.data.newMeters
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.lastMovementId == movementId
+        && getAfter(/databases/$(database)/documents/items/$(request.resource.data.itemId)).data.updatedAt == request.time;
+
+      // Append-only. The audit trail is sacred.
+      allow update, delete: if false;
+    }
+
+    // /deletedRecords — trash-bin tombstones. TTL on expireAt purges 7d.
+    // Snapshot fully cross-checked vs items doc; expireAt bound [6, 8] days.
+    match /deletedRecords/{itemId} {
+      allow read: if isActiveStaff();
+
+      allow create: if isActiveStaff()
+        && request.resource.data.snapshot is map
+        && request.resource.data.deletedAt == request.time
+        && request.resource.data.deletedBy == request.auth.uid
+        && isStringOrNull(request.resource.data.deleteReason)
+        && request.resource.data.expireAt is timestamp
+        && isNonEmptyString(request.resource.data.folderIdAtDelete)
+        && request.resource.data.folderAncestorsAtDelete is list
+        // 7-day retention bound, ±1 day for clock skew / TTL imprecision.
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) >= 6 * 24 * 60 * 60 * 1000
+        && (request.resource.data.expireAt.toMillis() - request.time.toMillis()) <= 8 * 24 * 60 * 60 * 1000
+        // Snapshot integrity: every field of the snapshot must mirror the
+        // pre-commit items doc. The snapshot is the recovery payload if
+        // the live doc is ever missing — forging it would corrupt restore.
+        && exists(/databases/$(database)/documents/items/$(itemId))
+        // Snapshot must mirror EVERY persisted field of the live items doc.
+        // Recovery payload in PRJ-797 reads this verbatim.
+        && request.resource.data.snapshot.itemId == itemId
+        && request.resource.data.snapshot.sku == get(/databases/$(database)/documents/items/$(itemId)).data.sku
+        && request.resource.data.snapshot.description == get(/databases/$(database)/documents/items/$(itemId)).data.description
+        && request.resource.data.snapshot.folderId == get(/databases/$(database)/documents/items/$(itemId)).data.folderId
+        && request.resource.data.snapshot.folderAncestors == get(/databases/$(database)/documents/items/$(itemId)).data.folderAncestors
+        && request.resource.data.snapshot.remainingMeters == get(/databases/$(database)/documents/items/$(itemId)).data.remainingMeters
+        && request.resource.data.snapshot.initialMeters == get(/databases/$(database)/documents/items/$(itemId)).data.initialMeters
+        && request.resource.data.snapshot.minimumMeters == get(/databases/$(database)/documents/items/$(itemId)).data.minimumMeters
+        && request.resource.data.snapshot.photoUrl == get(/databases/$(database)/documents/items/$(itemId)).data.photoUrl
+        && request.resource.data.snapshot.supplier == get(/databases/$(database)/documents/items/$(itemId)).data.supplier
+        && request.resource.data.snapshot.price == get(/databases/$(database)/documents/items/$(itemId)).data.price
+        && request.resource.data.snapshot.lastMovementId == get(/databases/$(database)/documents/items/$(itemId)).data.lastMovementId
+        && request.resource.data.snapshot.createdAt == get(/databases/$(database)/documents/items/$(itemId)).data.createdAt
+        && request.resource.data.snapshot.updatedAt == get(/databases/$(database)/documents/items/$(itemId)).data.updatedAt
+        && request.resource.data.snapshot.createdBy == get(/databases/$(database)/documents/items/$(itemId)).data.createdBy
+        && request.resource.data.snapshot.updatedBy == get(/databases/$(database)/documents/items/$(itemId)).data.updatedBy
+        && request.resource.data.folderIdAtDelete == get(/databases/$(database)/documents/items/$(itemId)).data.folderId
+        && request.resource.data.folderAncestorsAtDelete == get(/databases/$(database)/documents/items/$(itemId)).data.folderAncestors
+        // Items doc must reflect the soft-delete in this same commit
+        // (server-stamped deletedAt by the items.update rule).
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedAt == request.time
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedBy == request.auth.uid;
+
+      // Tombstones are immutable. TTL purges; no client deletes.
+      allow update, delete: if false;
+    }
+
+    // /users — staff profile docs (PRJ-856). Reads: active staff or admin.
+    // Writes: admin only (admin gate uses email_verified + adminEmail()).
+    match /users/{uid} {
+      // Read scope: active staff (so movement-history can render names) OR
+      // admin (so admin can see the user list before any users are active,
+      // and to manage deactivated entries). Plain `isAuthed()` would leak
+      // staff emails to revoked or never-provisioned accounts.
+      allow read, list: if isActiveStaff() || isAdminUser();
+
+      allow create: if isAdminUser()
+        && isNonEmptyString(request.resource.data.email)
+        && isNonEmptyString(request.resource.data.displayName)
+        && request.resource.data.isActive is bool
+        && isServerTime(request.resource.data.createdAt)
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid;
+
+      allow update: if isAdminUser()
+        && unchanged('email')
+        && unchanged('createdAt')
+        && unchanged('createdBy')
+        && isServerTime(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isNonEmptyString(request.resource.data.displayName)
+        && request.resource.data.isActive is bool;
+
+      allow delete: if isAdminUser();
+    }
+
+    // /config — admin-email lookup target. Read-only from clients;
+    // /config/admin seeded once via Firebase Console.
+    match /config/{document} {
+      allow read: if isAuthed();
+      allow create, update, delete: if false;
+    }
+
+    // Catch-all: explicit deny-by-default.
     match /{document=**} {
       allow read, write: if false;
     }

@@ -68,6 +68,10 @@ export async function createMovementAndAdjustItem(
 ): Promise<Result<{ movementId: string; newMeters: number }>> {
   if (!isValidMeters(params.newMeters)) return err('invalid-meters', 'newMeters must be a finite, non-negative number.');
   if (!isValidMeters(params.expectedOldMeters)) return err('invalid-meters', 'expectedOldMeters must be a finite, non-negative number.');
+  // Zero-delta adjustments are rejected at the boundary because Security
+  // Rules require lastMovementId to flip only when remainingMeters changes
+  // — a no-op write would fail at the auth layer (PRJ-805).
+  if (params.newMeters === params.expectedOldMeters) return err('zero-delta', 'No-op adjustment: newMeters equals expectedOldMeters.');
   // Attribution invariant — early-page-load auth race (see auth.ts) could
   // hand callers an empty string; the boundary fails fast so they can't.
   if (!isNonEmpty(params.actorUid)) return err('invalid-actor', 'actorUid is required and must be non-empty.');
@@ -115,7 +119,16 @@ export async function createMovementAndAdjustItem(
         at: serverTimestamp(),
       };
 
-      tx.update(itemRef, { remainingMeters: params.newMeters, updatedAt: serverTimestamp(), updatedBy: params.actorUid });
+      // `lastMovementId` is the rules-verifiable cross-reference: PRJ-805
+      // Security Rules use `getAfter(/movements/$(lastMovementId))` on the
+      // items update to require any `remainingMeters` change to be paired
+      // with a real audit entry written in this same commit.
+      tx.update(itemRef, {
+        remainingMeters: params.newMeters,
+        lastMovementId: movementRef.id,
+        updatedAt: serverTimestamp(),
+        updatedBy: params.actorUid,
+      });
       tx.set(movementRef, movementPayload);
 
       return { movementId: movementRef.id, newMeters: params.newMeters };

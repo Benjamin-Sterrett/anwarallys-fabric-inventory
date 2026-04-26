@@ -56,6 +56,7 @@ export const itemConverter: FirestoreDataConverter<RollItem> = {
       folderId: d.folderId,
       folderAncestors: d.folderAncestors ?? [],
       remainingMeters: d.remainingMeters,
+      lastMovementId: d.lastMovementId ?? null,
       initialMeters: d.initialMeters,
       minimumMeters: d.minimumMeters,
       photoUrl: d.photoUrl ?? null,

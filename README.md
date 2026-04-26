@@ -114,6 +114,18 @@ First build (scaffold only, no Firebase wiring yet):
 
 Well under the Cloudflare Pages 25 MiB Worker-bundle limit (which doesn't apply to static SPAs, but we're tracking it anyway). Firebase client SDK dominates the JS chunk at this stage; feature-ticket bundles will grow modestly from here.
 
+## Firestore Security Rules
+
+`firestore.rules` is the entire authorization surface — there is no server, no Admin SDK, no Cloud Functions. PRJ-805 ships the full rules; trade-offs and helper conventions are documented inline at the top of the file.
+
+**Bootstrap (one-time, before deploy):**
+
+1. Open the Firebase Console → Firestore.
+2. Create doc `/config/admin` with a single string field `adminEmail` set to the project admin's email. The `isAdminUser()` rule helper reads this on every `/users/{uid}` write. The admin's Firebase Auth account MUST have `email_verified == true` — Auth rules require it. Confirm via the Firebase Console → Authentication → Users tab; if `Email verified` is `false`, send the verification email via the SDK or the Console.
+3. Create at least one doc under `/users/{uid}` with `isActive: true`. Inventory rules gate on `isActiveStaff()`, which checks `/users/{request.auth.uid}.isActive`. Until at least one user doc exists, no staff can write to inventory paths. The admin can self-provision via PRJ-856's `/staff` page once it ships, or seed manually now.
+
+**Manual red-team validation:** see `firestore-rules-validation.md` for the emulator test plan (20 scenarios). Run before promoting rules to production. Automated coverage lands with PRJ-841.
+
 ## Project docs
 
 - `CLAUDE.md` — project status, locked decisions, wave plan, dev workflow
