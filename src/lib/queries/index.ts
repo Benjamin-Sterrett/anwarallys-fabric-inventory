@@ -12,7 +12,7 @@ export {
   type CreateFolderParams,
 } from './folders';
 export {
-  getItemById, createItem, updateItem, listActiveItemsInFolder,
+  getItemById, getItemByIdFromServer, createItem, updateItem, listActiveItemsInFolder,
   type GetItemByIdOptions, type CreateItemParams, type UpdateItemParams,
 } from './items';
 export {
