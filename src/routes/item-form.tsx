@@ -95,10 +95,11 @@ function ItemFormPage(props: ItemFormPageProps) {
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
 
-  // create → load parent folder (for folderAncestors); edit → load item.
+  // create → load parent folder (for folderAncestors); edit → load item + parent folder.
   const [folder, setFolder] = useState<Folder | null | undefined>(undefined);
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     if (authUser === undefined) return;
@@ -117,20 +118,28 @@ function ItemFormPage(props: ItemFormPageProps) {
     } else {
       if (!props.itemId) { setItem(null); setLoadError('Missing item in URL.'); return; }
       setItem(undefined);
+      setFolder(undefined);
       void getItemById(props.itemId).then((r) => {
         if (cancelled) return;
         if (!r.ok) { setItem(null); setLoadError(`Could not load item: ${r.error.message} (${r.error.code})`); return; }
         if (!r.data) { setItem(null); setLoadError('That item no longer exists.'); return; }
         setItem(r.data);
+        void getFolderById(r.data.folderId).then((fr) => {
+          if (cancelled) return;
+          if (!fr.ok) { setFolder(null); setLoadError(`Could not load folder: ${fr.error.message} (${fr.error.code})`); return; }
+          if (fr.data === null) { setFolder(null); setLoadError('That folder no longer exists.'); return; }
+          if (fr.data.deletedAt !== null) { setFolder(null); setLoadError('That folder has been deleted.'); return; }
+          setFolder(fr.data);
+        });
       });
     }
     return () => { cancelled = true; };
-  }, [authUser, props.mode, props.folderId, props.itemId]);
+  }, [authUser, props.mode, props.folderId, props.itemId, retryToken]);
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
-    if (props.mode === 'edit' && item) { setForm(fromItem(item)); setHydrated(true); }
+    if (props.mode === 'edit' && item && folder) { setForm(fromItem(item)); setHydrated(true); }
     else if (props.mode === 'create' && folder) { setForm(EMPTY_FORM); setHydrated(true); }
   }, [props.mode, item, folder]);
 
@@ -200,7 +209,16 @@ function ItemFormPage(props: ItemFormPageProps) {
       <section className="mx-auto max-w-2xl px-4 py-8">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-700">{loadError}</p>
-          <Link to={cancelTarget} className={`${BTN_SECONDARY} mt-3`}>Back</Link>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setRetryToken((n) => n + 1)}
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700"
+            >
+              Retry
+            </button>
+            <Link to={cancelTarget} className={BTN_SECONDARY}>Back</Link>
+          </div>
         </div>
       </section>
     );
