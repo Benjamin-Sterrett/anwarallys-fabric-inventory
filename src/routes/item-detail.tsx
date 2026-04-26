@@ -1,15 +1,24 @@
 // Item-detail page (PRJ-789) — Wave 3. Hosts the persistent home for
 // Adjust entry, Undo affordance, and movement history. Mount-time read
-// goes through `getItemByIdFromServer` because this page is the
-// authoritative surface for the Undo math (PRJ-787 R5/R7 lesson — the
-// persistent local cache can hold pre-commit `remainingMeters` for
-// seconds after a transaction lands; cache-backed mount could rehydrate
-// stale state and let the operator double-apply on Undo). Cache-backed
-// `listMovementsForItem` is fine for the read-only history list.
+// uses cache-backed `getItemById` so the page works on flaky storeroom
+// Wi-Fi (pilot reality). This is a browse/info surface — the
+// stock-write safety nets do NOT depend on this mount being fresh:
+//   • PRJ-890 server rules reject stale Undo
+//     (reversesMovementId === server `lastMovementId`); a stale-cache
+//     mount can't trick the server into double-applying.
+//   • The 15-sec Undo window is anchored on server-stamped
+//     `Movement.at.toMillis()` (PRJ-883 R3), not on mount time, so a
+//     stale-cache rehydration cannot extend it.
+//   • The safety-critical mount lives in `/rolls/{id}/adjust`
+//     (`rolls-adjust.tsx`), which keeps `getItemByIdFromServer` per
+//     PRJ-883 R7. That route is the authoritative surface for stock
+//     writes; this one is read-mostly + Undo entry.
+// Reverting the mount-time read here was lead Codex round 1 P1 on
+// PR #24: routing item-row taps to `/items/{id}` instead of `/edit`
+// regressed offline browse if this mount required the network.
 //
-// The 15-sec Undo window anchors on `Movement.at.toMillis()` — server
-// stamped — not client clock (PRJ-883 R3). A 1Hz `now` tick re-evaluates
-// without re-fetching, keeping the cost flat.
+// `listMovementsForItem` is also cache-friendly for the history list.
+// A 1Hz `now` tick re-evaluates the Undo window without re-fetching.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -19,7 +28,7 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import {
   createMovementAndAdjustItem,
   getFolderById,
-  getItemByIdFromServer,
+  getItemById,
   getUserByUid,
   listMovementsForItem,
 } from '@/lib/queries';
@@ -134,7 +143,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
     if (authUser === undefined) return;
     let cancelled = false;
     setItem(undefined); setLoadError(null);
-    void getItemByIdFromServer(itemId).then((r) => {
+    void getItemById(itemId).then((r) => {
       if (cancelled) return;
       if (!r.ok) {
         setItem(null);
@@ -177,11 +186,12 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
   // Cache-backed (browse, not safety-critical writes).
   const [movements, setMovements] = useState<Movement[] | undefined>(undefined);
   const [movementsError, setMovementsError] = useState<string | null>(null);
+  const [hasMoreMovements, setHasMoreMovements] = useState(false);
   const [historyToken, setHistoryToken] = useState(0);
   useEffect(() => {
     if (authUser === undefined || !item) return;
     let cancelled = false;
-    setMovements(undefined); setMovementsError(null);
+    setMovements(undefined); setMovementsError(null); setHasMoreMovements(false);
     void listMovementsForItem(itemId, HISTORY_PAGE_SIZE).then((r) => {
       if (cancelled) return;
       if (!r.ok) {
@@ -190,6 +200,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
         return;
       }
       setMovements(r.data.items);
+      setHasMoreMovements(r.data.hasMore);
     });
     return () => { cancelled = true; };
   }, [authUser, item, itemId, historyToken]);
@@ -365,6 +376,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
             <p className="text-sm text-gray-700">No movements yet.</p>
           </div>
         ) : (
+          <>
           <ul className="space-y-2">
             {movements.map((m) => {
               const isReversal = m.reversesMovementId !== null;
@@ -406,6 +418,12 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
               );
             })}
           </ul>
+          {hasMoreMovements ? (
+            <p className="mt-3 text-xs text-gray-600">
+              Showing the {HISTORY_PAGE_SIZE} most recent adjustments. Older entries are not shown.
+            </p>
+          ) : null}
+          </>
         )}
       </section>
     </section>
