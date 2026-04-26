@@ -60,6 +60,11 @@ Run scenarios via the Emulator UI Rules Playground or `@firebase/rules-unit-test
 | 26 | Items update on a soft-deleted item changing `sku` (PRJ-858) | Rejected (only restore allowed) | _pending_ |
 | 27 | Folder update renaming a soft-deleted folder | Rejected (PRJ-858 mirror) | _pending_ |
 | 28 | Movement create with `actorName` ≠ caller's `displayName` (PRJ-859) | Rejected (anti-spoof) | _pending_ |
+| 29a | Active staff (non-admin) `getDoc(/users/{ownUid})` (PRJ-861) | Allowed (own profile only) | _pending_ |
+| 29b | Active staff (non-admin) `getDoc(/users/{otherUid})` (PRJ-861) | Rejected (no coworker email leak) | _pending_ |
+| 29c | Active staff (non-admin) `getDocs(collection(db, 'users'))` (PRJ-861) | Rejected (list = admin only) | _pending_ |
+| 29d | Admin `getDocs(collection(db, 'users'))` (PRJ-861) | Allowed | _pending_ |
+| 30 | Active staff edits an item whose `folderId` is active but a folderAncestor is soft-deleted (PRJ-860) | Allowed (Rules don't iterate ancestors). PRJ-796 UI must prevent this state from existing. | _pending_ |
 
 ## Atomic stock-write enforcement
 
@@ -83,7 +88,10 @@ attributable audit row.
 ## Known v1 limitations (deferred)
 
 - **Re-delete within 7d:** restoring then re-deleting fails because the prior tombstone still exists. Wait for TTL or Console-clear. Follow-up filed.
-- **Folder cascade:** soft-deleting a folder does NOT cascade. PRJ-796 UI must enforce empty-subtree-before-delete. Follow-up filed.
+- **Folder cascade / orphaned descendants (PRJ-860):** Firestore Security Rules architecturally cannot enforce subtree state. Rules expressions can `get()` specific docs but not iterate collections (no `getDocs`/aggregate-query primitive in Rules), and Rules has no list-iteration primitive to walk an item's `folderAncestors[]`. Server-side cascade code is banned by project invariant (client SDK only).
+  - **What Rules DO check:** items.update / items.create require the DIRECT parent folder (`folderId`) to be active. So you cannot move an item directly under a soft-deleted folder.
+  - **What Rules do NOT check:** ancestor folders along `folderAncestors[]` are not re-validated on item writes, and folder.update does not re-check ancestor state on rename or restore. An active child folder under a soft-deleted GRANDPARENT can still be renamed, and items under that active child can still be edited and stock-adjusted. This is a real authz gap, not a "frozen" state.
+  - **Mitigation:** PRJ-796 (Wave 5 soft-delete UI) MUST enforce empty-subtree-before-delete via `getCountFromServer` on the full subtree, not just direct children. Until that ships, soft-deleting a non-leaf folder leaves the descendant subtree fully writable. NOT a Rules-fixable gap.
 
 ## Sign-off
 

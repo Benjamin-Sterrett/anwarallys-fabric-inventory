@@ -356,14 +356,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // /users — staff profile docs (PRJ-856). Reads: active staff or admin.
-    // Writes: admin only (admin gate uses email_verified + adminEmail()).
+    // /users — staff profile docs (PRJ-856). Writes admin-only.
     match /users/{uid} {
-      // Read scope: active staff (so movement-history can render names) OR
-      // admin (so admin can see the user list before any users are active,
-      // and to manage deactivated entries). Plain `isAuthed()` would leak
-      // staff emails to revoked or never-provisioned accounts.
-      allow read, list: if isActiveStaff() || isAdminUser();
+      // PRJ-861: non-admin staff can only read their OWN /users doc.
+      // movement-history UI reads actorName from the movement doc itself
+      // (already denormalized per the schema), and the displayName check
+      // on movement create runs server-side via Rules `get()` which has
+      // privileged read regardless of this rule. Admins can read any
+      // user (Staff page in PRJ-856). Listing collection is admin-only.
+      allow get: if isAdminUser() || (isActiveStaff() && uid == request.auth.uid);
+      allow list: if isAdminUser();
 
       allow create: if isAdminUser()
         && isNonEmptyString(request.resource.data.email)

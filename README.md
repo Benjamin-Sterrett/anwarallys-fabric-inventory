@@ -124,7 +124,9 @@ Well under the Cloudflare Pages 25 MiB Worker-bundle limit (which doesn't apply 
 2. Create doc `/config/admin` with a single string field `adminEmail` set to the project admin's email. The `isAdminUser()` rule helper reads this on every `/users/{uid}` write. The admin's Firebase Auth account MUST have `email_verified == true` — Auth rules require it. Confirm via the Firebase Console → Authentication → Users tab; if `Email verified` is `false`, send the verification email via the SDK or the Console.
 3. Create a `/users/{uid}` doc for EVERY authenticated user (including the admin) with `isActive: true` and a non-empty `displayName`. Inventory rules gate on `isActiveStaff()` (checks `isActive == true`), and movement creates require `actorName == /users/{auth.uid}.displayName` (PRJ-859 anti-spoof). Until a user has a `/users` doc, they cannot write inventory or movements. The admin can self-provision via PRJ-856's `/staff` page once it ships, or seed manually now.
 
-**Manual red-team validation:** see `firestore-rules-validation.md` for the emulator test plan (20 scenarios). Run before promoting rules to production. Automated coverage lands with PRJ-841.
+**Folder soft-delete depends on PRJ-796 UI (PRJ-860):** Firestore Security Rules cannot enforce subtree state — Rules expressions can `get()` specific docs but not iterate collections, and Rules has no list-iteration primitive to walk an item's `folderAncestors[]`. Server-side code is banned by project invariant. The Rules layer ONLY checks that an item's DIRECT parent folder is active; ancestor state is not re-validated on item writes, and folder.update does not re-check ancestor state. An active child folder under a soft-deleted grandparent therefore remains fully writable. PRJ-796 (Wave 5 soft-delete UI) MUST enforce empty-subtree-before-delete via `getCountFromServer` on the full subtree before this gap is closed. Tracked as PRJ-860.
+
+**Manual red-team validation:** see `firestore-rules-validation.md` for the emulator test plan. Run before promoting rules to production. Automated coverage lands with PRJ-841.
 
 ## Project docs
 
