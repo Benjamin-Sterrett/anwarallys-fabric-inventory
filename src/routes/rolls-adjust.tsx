@@ -37,25 +37,26 @@ const INPUT = 'mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3
 
 type Tab = 'sold' | 'exact';
 
-// Strict allowlist; ESL `9,5` parses, `-3` `9..5` `1.234` rejected. Rounded
-// to 2dp at parse so display === persisted value (lead Codex R2 P1).
+// 2dp rounding — parser, sold-tab subtraction, stepper all share (R4 P2.1).
+const round2dp = (n: number): number => Math.round(n * 100) / 100;
+
+// Strict allowlist; ESL `9,5` parses, `-3` `9..5` `1.234` rejected.
+// Rounded to 2dp so display === persisted (R2 P1).
 function parseDecimalLocale(raw: string): number | null {
   const s = raw.trim();
   if (s === '' || !/^[0-9]+([.,][0-9]{1,2})?$/.test(s)) return null;
   const n = Number(s.replace(',', '.'));
   if (!Number.isFinite(n) || n < 0) return null;
-  return Math.round(n * 100) / 100;
+  return round2dp(n);
 }
 
-// Half a displayed hundredth — guards against float-drifted stored values
-// (e.g. `0.19999...` vs re-typed `0.2`) producing phantom no-op writes.
+// Half a displayed hundredth — float-drift safe no-op detection (R2 P1).
 const METERS_EPSILON = 0.005;
 const meterEquals = (a: number, b: number): boolean => Math.abs(a - b) < METERS_EPSILON;
 
 function formatMeters(n: number): string {
   if (!Number.isFinite(n)) return '–';
-  const r = Math.round(n * 100) / 100;
-  return `${r} m`;
+  return `${round2dp(n)} m`;
 }
 
 function mapErrorCode(code: string, fallback: string): string {
@@ -83,8 +84,7 @@ function useOnline(): boolean {
   return online;
 }
 
-// Press for HOLD_MS to fire `onConfirm`. Release early cancels. Second
-// guard against double-saves; first is `submitting` flag on Save.
+// Press HOLD_MS → onConfirm. Second double-save guard (first is `submitting`).
 function HoldToConfirm({ label, onConfirm, disabled }: { label: string; onConfirm: () => void; disabled?: boolean }) {
   const [progress, setProgress] = useState(0);
   const startRef = useRef<number | null>(null);
@@ -193,8 +193,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     return () => window.clearTimeout(t);
   }, [lastMovement]);
 
-  // Snack-only auto-dismiss (lead Codex P3). lastMovement effect covers
-  // Save success; after Undo clears lastMovement, "Undone." needs its own.
+  // Snack-only auto-dismiss (R1 P3) — covers post-undo "Undone." banner.
   useEffect(() => {
     if (!snack || lastMovement) return;
     const t = window.setTimeout(() => setSnack(null), 4000);
@@ -210,11 +209,11 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const parsed = useMemo(() => parseDecimalLocale(metersInput), [metersInput]);
 
-  // Sold tab: subtract input from on-hand. Exact tab: input IS the new on-hand.
+  // Sold: round2dp guards against legacy drifted remainingMeters (R4 P2.1).
   const targetNewMeters = useMemo<number | null>(() => {
     if (parsed === null || !item) return null;
     if (tab === 'sold') {
-      const next = item.remainingMeters - parsed;
+      const next = round2dp(item.remainingMeters - parsed);
       return Number.isFinite(next) ? next : null;
     }
     return parsed;
@@ -234,7 +233,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const stepBy = useCallback((amount: number) => {
     setMetersInput((cur) => {
       const n = parseDecimalLocale(cur) ?? 0;
-      return String(Math.max(0, Math.round((n + amount) * 100) / 100));
+      return String(Math.max(0, round2dp(n + amount)));
     });
   }, []);
   const startStep = useCallback((amount: number) => {
@@ -255,9 +254,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const onConfirm = useCallback(async () => {
     if (!item || !authUser || !userDoc || targetNewMeters === null || reason === null) return;
     setSubmitting(true); setSubmitError(null);
-    // Asymmetry intentional (lead Codex R2 P1.d): expectedOldMeters must be
-    // raw (boundary strict-equals it; rounding → `meters-mismatch`).
-    // newMeters is the rounded display value (parseDecimalLocale rounds).
+    // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
+    // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
       itemId: item.itemId,
       expectedOldMeters: item.remainingMeters,
@@ -275,19 +273,17 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (timer !== null) window.clearTimeout(timer);
     setSubmitting(false); setConfirmOpen(false);
     if (!r.ok) {
-      // Timeout: do NOT infer success (lead Codex R3 P2). A coincident write
-      // from another staff with the same final meters would falsely attach
-      // their movement to this save and let Undo reverse THEIR work. Proving
-      // authorship needs a per-call correlation id (Movement schema change —
-      // out of scope). Refresh + ask the operator to verify.
+      // Timeout: do NOT infer success (lead Codex R3 P2 — coincident concurrent
+      // write could mis-attribute; needs per-call correlation id, schema change
+      // out of scope). Refresh + verify-before-retry message instead.
       if (r.error.code === 'timeout') {
         void reloadItem();
         setMetersInput('');
         setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
         return;
       }
-      // Concurrent edit (lead Codex R3 P1): clear metersInput so the Sold
-      // tab doesn't recompute against the new on-hand and double-debit.
+      // Concurrent edit (R3 P1): clear input so Sold tab doesn't recompute
+      // against the new on-hand and double-debit.
       if (r.error.code === 'meters-mismatch') {
         setMetersInput('');
         reloadItem();
@@ -332,7 +328,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
   }, [lastMovement, authUser, userDoc, item, reloadItem]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
-    return <section className="mx-auto max-w-2xl px-4 py-8"><p className="text-sm text-gray-600">Loading…</p></section>;
+    // submitError stays above the loading shell so meters-mismatch/timeout
+    // messages survive the reload window (R4 P2.2; mirrors R1 P2 success path).
+    return (
+      <section className="mx-auto max-w-2xl px-4 py-8">
+        {submitError ? <p className="mb-3 text-sm text-red-700" role="alert">{submitError}</p> : null}
+        <p className="text-sm text-gray-600">Loading…</p>
+      </section>
+    );
   }
   if (authUser === null) {
     return <section className="mx-auto max-w-2xl px-4 py-8"><p className="text-sm text-red-700">You must be signed in.</p></section>;
