@@ -148,8 +148,11 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
 
-  // Firestore effects gate on `authUser !== undefined` — reads launched
-  // before auth resolves hit permission-denied and stick.
+  // Cache-backed mount reads (PRJ-893): folder browse is a non-mutating
+  // surface. Offline-friendly folder tree navigation is an explicit pilot
+  // requirement (storeroom Wi-Fi is unreliable). Safety-critical writes
+  // (stock adjust, staff admin) use server-authoritative reads on their
+  // respective routes.
   const [retryToken, setRetryToken] = useState(0);
   const [currentFolder, setCurrentFolder] = useState<Folder | null | undefined>(undefined);
   const [currentError, setCurrentError] = useState<string | null>(null);

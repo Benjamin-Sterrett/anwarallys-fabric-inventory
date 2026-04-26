@@ -25,7 +25,9 @@ export {
 } from './movements';
 export {
   listActiveStaff,
+  listActiveStaffFromServer,
   listInactiveStaff,
+  listInactiveStaffFromServer,
   getUserByUid,
   createStaffUser,
   renameStaffUser,

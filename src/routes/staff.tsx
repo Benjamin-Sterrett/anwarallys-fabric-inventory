@@ -26,8 +26,8 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import {
   createStaffUser,
   deactivateStaffUser,
-  listActiveStaff,
-  listInactiveStaff,
+  listActiveStaffFromServer,
+  listInactiveStaffFromServer,
   reactivateStaffUser,
   renameStaffUser,
 } from '@/lib/queries';
@@ -329,12 +329,16 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
     setLoading(true);
     setActiveError(null);
     setInactiveError(null);
+    // Server-authoritative reads (PRJ-893): staff management is a safety-
+    // critical admin surface. A stale cache could show a staff member as
+    // active when another admin already deactivated them, leading to
+    // confusing error states on the subsequent deactivate/rename attempt.
     // Two independent reads — surfacing each error separately means a
     // partial failure (e.g. transient permission glitch on one query)
     // doesn't blank both lists.
     const [activeResult, inactiveResult] = await Promise.all([
-      listActiveStaff(),
-      listInactiveStaff(),
+      listActiveStaffFromServer(),
+      listInactiveStaffFromServer(),
     ]);
     setLoading(false);
     // Filter the admin's own /users doc out of BOTH lists. README §122
@@ -352,20 +356,31 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
       setActiveStaff(activeResult.data.filter((u) => u.uid !== adminUid));
     } else {
       setActiveStaff(null);
+      const offline = activeResult.error.code === 'firestore/unavailable';
+      const hint = offline
+        ? ' You appear to be offline; this page needs a server connection.'
+        : '';
       setActiveError(
-        `Could not load active staff: ${activeResult.error.message} (${activeResult.error.code})`,
+        `Could not load active staff: ${activeResult.error.message} (${activeResult.error.code}).${hint}`,
       );
     }
     if (inactiveResult.ok) {
       setInactiveStaff(inactiveResult.data.filter((u) => u.uid !== adminUid));
     } else {
       setInactiveStaff(null);
+      const offline = inactiveResult.error.code === 'firestore/unavailable';
+      const hint = offline
+        ? ' You appear to be offline; this page needs a server connection.'
+        : '';
       setInactiveError(
-        `Could not load turned-off staff: ${inactiveResult.error.message} (${inactiveResult.error.code})`,
+        `Could not load turned-off staff: ${inactiveResult.error.message} (${inactiveResult.error.code}).${hint}`,
       );
     }
   }, [adminUid]);
 
+  // Server-authoritative mount (PRJ-893): see refresh() comment above.
+  // Offline at mount surfaces a clear error rather than silently falling
+  // back to potentially stale cache.
   useEffect(() => {
     void refresh();
   }, [refresh]);
