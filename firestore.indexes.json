@@ -49,8 +49,7 @@
       "fields": [
         { "fieldPath": "clientCorrelationId", "order": "ASCENDING" },
         { "fieldPath": "itemId", "order": "ASCENDING" },
-        { "fieldPath": "actorUid", "order": "ASCENDING" },
-        { "fieldPath": "at", "order": "ASCENDING" }
+        { "fieldPath": "actorUid", "order": "ASCENDING" }
       ]
     }
   ],

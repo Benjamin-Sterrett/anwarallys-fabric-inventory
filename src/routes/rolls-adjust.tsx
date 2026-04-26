@@ -10,7 +10,6 @@ import {
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
@@ -111,21 +110,19 @@ async function reconcileTimedOutSave(
   itemId: string,
   clientCorrelationId: string,
   actorUid: string,
-  since: Timestamp,
 ): Promise<{ kind: 'found'; movement: Movement } | { kind: 'inconclusive' }> {
   for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    // `since` is server-stamped (`item.updatedAt`, R3 P2 / lead Codex
-    // round 3) and reused on every poll. Server-anchoring eliminates
-    // client clock-skew false negatives that would have let a successful
-    // save commit with `at < since` (when the device clock runs ahead of
-    // Firestore). Time-bounding still defeats deliberate correlation-id
-    // replay: an older movement's `at` is < `since`, so the query won't
-    // match it — combined with v4 UUID uniqueness, false matches are
-    // effectively impossible.
-    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid, since);
+    // Lookup is scoped by (clientCorrelationId, itemId, actorUid). The
+    // earlier `at >= item.updatedAt` time-bound (R2/R3/R5) was removed in
+    // R6: in a successful tx `serverTimestamp()` resolves to the SAME
+    // `request.time` for both `movement.at` and `item.updatedAt`, so
+    // `at >= updatedAt` matched the previous movement and never closed
+    // the replay window. Self-replay defense moves to write-side
+    // idempotency (PRJ-892); v4 UUID + actor scoping cover the rest.
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
     if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
     // r.ok && r.data === null  → not yet observed; keep polling.
     // !r.ok                    → probe errored; keep polling.
@@ -356,25 +353,6 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // the client-side timeout fires before the boundary's success
     // result lands. Fresh per attempt — never replayed across saves.
     const correlationId = randomUUIDv4();
-    // R3 P2 / lead Codex round 3: anchor the reconcile time-bound to the
-    // server-stamped `item.updatedAt` rather than a client wall-clock
-    // value (`Timestamp.fromDate(new Date())`). Movement.at is stamped by
-    // the server; comparing it to a client clock is unsafe on devices
-    // whose wall-clock runs ahead of NTP/Firestore (common on older
-    // Androids) — a successful save can commit with `at < since` (server
-    // time) and the reconcile lookup misses it. `item.updatedAt` is the
-    // server-stamped timestamp from the most recent item read; any
-    // successful save updates the item in the same transaction as the
-    // movement create, so the new movement's `at` is necessarily
-    // >= item.updatedAt. Both timestamps are server-time → clock skew
-    // on the device is irrelevant. Bound may be wider than the actual
-    // attempt's start (if the page has been open a long time); that's
-    // safe — wider doesn't miss successful writes. Replay defense
-    // remains: actor-scoped query + v4 UUID uniqueness are the
-    // primary protections; the time-bound is defense-in-depth.
-    const reconcileSince: Timestamp = item.updatedAt instanceof Timestamp
-      ? item.updatedAt
-      : Timestamp.fromMillis(0);
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -414,23 +392,26 @@ function AdjustPage({ itemId }: { itemId: string }) {
       //   a real double-apply window. Confirmed-not-committed semantics
       //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid, reconcileSince);
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
         if (outcome.kind === 'found') {
           // Late-success path — restore the 15-sec Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/
           // movementId), NOT the client request, so a query hit can
           // never mislead the Undo math.
+          //
+          // R6: no post-success `reloadItemFromServer()` here. The
+          // earlier R5 refresh existed to refresh `item.updatedAt` for
+          // the next save's reconcile time-bound — the time-bound itself
+          // is gone (R6 design simplification), so the refresh is
+          // unnecessary. It was also masking the snackbar/Undo
+          // affordance during the refetch (reloadItemFromServer sets
+          // item to undefined), which could swallow the 15-sec Undo
+          // window on slow networks.
           const m = outcome.movement;
           setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
           setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
-          // Lead Codex R5 P2: refresh item from server so item.updatedAt
-          // reflects the just-committed write. The next save uses
-          // item.updatedAt as the reconcile `since` lower bound; without
-          // this refresh, a replayed correlation id from the prior save
-          // would falsely match (its `at` >= stale updatedAt).
-          void reloadItemFromServer();
           setSubmitting(false);
           return;
         }
@@ -463,14 +444,15 @@ function AdjustPage({ itemId }: { itemId: string }) {
     }
     // In-place setItem from authoritative boundary return — no refetch on
     // success path (lead Codex P2: refetch unmounted Undo affordance).
+    // R6: no post-success `reloadItemFromServer()`. The earlier R5 call
+    // existed only to refresh `item.updatedAt` for the next save's
+    // reconcile time-bound; the time-bound is gone after R6, so the
+    // refresh is unnecessary — and it was hiding the snackbar/Undo
+    // during refetch.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
-    // Lead Codex R5 P2: see found-path comment. Background refresh so
-    // item.updatedAt reflects the post-commit server state — the next
-    // save's reconcile `since` bound is fresh.
-    void reloadItemFromServer();
     setSubmitting(false);
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
 
@@ -508,12 +490,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
       return;
     }
     // Same in-place update pattern as onConfirm — avoid the unmount race.
+    // R6: no post-undo `reloadItemFromServer()` (R6 design simplification —
+    // see onConfirm comments). The boundary returns server-authoritative
+    // values; nothing else needs refreshing.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setSnack('Undone.');
-    // Lead Codex R5 P2: see onConfirm. Refresh item.updatedAt so the next
-    // save's reconcile `since` bound is fresh post-undo.
-    void reloadItemFromServer();
-  }, [lastMovement, authUser, userDoc, item, reloadItemFromServer]);
+  }, [lastMovement, authUser, userDoc, item]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
     // submitError stays above the loading shell so meters-mismatch/timeout

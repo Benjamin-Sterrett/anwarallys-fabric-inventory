@@ -17,7 +17,6 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  Timestamp,
   where,
   type DocumentReference,
   type Firestore,
@@ -271,9 +270,10 @@ export async function listMovementsForItem(
  * write. Caller MUST handle `firestore/unavailable` (offline / no
  * server reachable) — there is no cache fallback by design.
  *
- * Quadruply-scoped for ownership + replay safety:
- *   - `clientCorrelationId` (user-supplied UUID v4)
- *   - `itemId` (narrows to the save attempt's intended target)
+ * Triply-scoped for ownership + replay safety:
+ *   - `clientCorrelationId` (user-supplied UUID v4 — accidental reuse
+ *      is statistically impossible given the v4 entropy budget).
+ *   - `itemId` (narrows to the save attempt's intended target).
  *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
  *      by any active staff and Rules only validate `clientCorrelationId`
  *      as a non-empty string. A devtools-savvy staff member could copy
@@ -284,26 +284,19 @@ export async function listMovementsForItem(
  *      forging the field on WRITE is impossible — but READ access is
  *      shared. The `actorUid` equality filter closes that read-side
  *      leak. Caller passes the current user's uid.)
- *   - `at >= since` (R2 P2 / lead Codex round 2: even with actor-scope,
- *      a staff member can replay one of their OWN earlier correlation
- *      ids — capture from devtools, then craft a new save with the same
- *      value. The reconcile lookup would return the OLDER movement,
- *      causing a false late-success for the new write. Time-bounding by
- *      a recent server-stamped reference eliminates that vector: the
- *      older movement's `at` is < `since`, so the query won't match it.
- *      Combined with v4 UUID uniqueness, the chance of a false match is
- *      effectively zero. **`since` MUST be a server-stamped Timestamp**
- *      (e.g. the pre-save `RollItem.updatedAt`) — NOT a client wall-clock
- *      value (R3 P2 / lead Codex round 3). `Movement.at` is stamped by
- *      the server; comparing it to a client clock breaks on devices
- *      whose wall-clock runs ahead of Firestore (common on older
- *      Androids) — a successful save can commit with server-time
- *      `at < since` and the lookup misses it, dropping the operator
- *      into inconclusive when the save actually landed. A wider bound
- *      (older `updatedAt`) is harmless — it doesn't miss successful
- *      writes; only narrower-than-server-time bounds are unsafe.
- *      Equality fields first, range field last — required shape for
- *      Firestore composite indexes with N equalities + 1 range filter.)
+ *
+ * Self-replay (an authenticated staff member deliberately reusing one of
+ * their OWN earlier correlation ids via devtools to coerce a false
+ * late-success on a future save) is NOT defended at this layer. The
+ * earlier R2/R3/R5 attempt to time-bound the query by `item.updatedAt`
+ * had a fundamental flaw: in a successful transaction `serverTimestamp()`
+ * resolves to the SAME `request.time` for both `movement.at` and
+ * `item.updatedAt`, so `at >= updatedAt` STILL matched the previous
+ * movement — the time-bound never closed the replay window it was
+ * supposed to close. The correct fix is write-side idempotency
+ * (rejecting reused `clientCorrelationId` values at commit time);
+ * tracked as PRJ-892. The realistic threat model for the pilot
+ * environment makes the gap acceptable until that ticket lands.
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query
@@ -322,12 +315,10 @@ export async function findMovementByCorrelationId(
   itemId: string,
   clientCorrelationId: string,
   actorUid: string,
-  since: Timestamp,
 ): Promise<Result<Movement | null>> {
   if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
   if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
   if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
-  if (!(since instanceof Timestamp)) return err('invalid-correlation-id', 'since must be a Firestore Timestamp.');
 
   let db: Firestore;
   try {
@@ -344,7 +335,6 @@ export async function findMovementByCorrelationId(
       where('clientCorrelationId', '==', clientCorrelationId),
       where('itemId', '==', itemId),
       where('actorUid', '==', actorUid),
-      where('at', '>=', since),
       queryLimit(1),
     );
     const docs = (await getDocsFromServer(q)).docs;
