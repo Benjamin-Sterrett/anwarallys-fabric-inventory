@@ -177,16 +177,24 @@ export async function createStaffUser(
         await updateProfile(cred.user, { displayName: params.displayName.trim() });
       } catch (profileErr: unknown) {
         // Fail-closed: Auth displayName is required. Delete orphan and surface error.
-        // Retry may hit email-already-in-use if createUser succeeded server-side.
         const profileMessage = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        let rollbackOk = false;
         try {
           await deleteUser(cred.user);
+          rollbackOk = true;
         } catch {
-          // Ignore rollback failure — orphan will be visible in Firebase Console.
+          // Rollback failed — account state unknown (same network class as the
+          // original updateProfile error). Do NOT tell admin it is safe to retry.
+        }
+        if (rollbackOk) {
+          return err(
+            'auth/profile-update-failed',
+            `${profileMessage} (Auth account rolled back.)`,
+          );
         }
         return err(
           'auth/profile-update-failed',
-          `${profileMessage} (Auth displayName could not be set. Account rolled back. Retry may hit email-already-in-use if the user was created server-side.)`,
+          `${profileMessage} (Account state unknown. Verify in Firebase Console before retrying — a stale Auth account would block re-creation.)`,
         );
       }
     } catch (e: unknown) {
