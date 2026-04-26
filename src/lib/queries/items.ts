@@ -6,8 +6,8 @@
 
 import { FirebaseError } from 'firebase/app';
 import {
-  addDoc, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp,
-  updateDoc, where, type Firestore,
+  addDoc, collection, doc, getDoc, getDocFromServer, getDocs, orderBy, query,
+  serverTimestamp, updateDoc, where, type Firestore,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter } from '@/lib/firebase/converters';
@@ -67,6 +67,38 @@ export async function getItemById(
   try {
     const ref = doc(db, 'items', itemId).withConverter(itemConverter);
     const snap = await getDoc(ref);
+    if (!snap.exists()) return ok(null);
+    const item = snap.data();
+    if (!options.includeDeleted && item.deletedAt !== null) return ok(null);
+    return ok(item);
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Same as `getItemById` but bypasses the persistent local cache via
+ * `getDocFromServer`. Use ONLY on safety-critical post-write reconcile
+ * paths (PRJ-787 timeout / meters-mismatch recovery): the cache can hold
+ * pre-commit state for several seconds after a transaction lands, which
+ * would let the operator double-apply an adjustment that already
+ * succeeded. Caller MUST handle `firestore/unavailable` (offline / no
+ * server reachable) — there is no cache fallback by design.
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`, `firestore/unknown`.
+ */
+export async function getItemByIdFromServer(
+  itemId: string,
+  options: GetItemByIdOptions = {},
+): Promise<Result<RollItem | null>> {
+  const dbR = resolveDb();
+  if (!dbR.ok) return dbR.result;
+  const { db } = dbR;
+
+  try {
+    const ref = doc(db, 'items', itemId).withConverter(itemConverter);
+    const snap = await getDocFromServer(ref);
     if (!snap.exists()) return ok(null);
     const item = snap.data();
     if (!options.includeDeleted && item.deletedAt !== null) return ok(null);

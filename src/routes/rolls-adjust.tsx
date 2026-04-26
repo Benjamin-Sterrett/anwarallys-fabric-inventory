@@ -11,7 +11,7 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { createMovementAndAdjustItem, getItemById, getUserByUid } from '@/lib/queries';
+import { createMovementAndAdjustItem, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { MovementReason, RollItem, User } from '@/lib/models';
 
 const HOLD_MS = 800;
@@ -49,10 +49,6 @@ function parseDecimalLocale(raw: string): number | null {
   if (!Number.isFinite(n) || n < 0) return null;
   return round2dp(n);
 }
-
-// Half a displayed hundredth — float-drift safe no-op detection (R2 P1).
-const METERS_EPSILON = 0.005;
-const meterEquals = (a: number, b: number): boolean => Math.abs(a - b) < METERS_EPSILON;
 
 function formatMeters(n: number): string {
   if (!Number.isFinite(n)) return '–';
@@ -162,6 +158,23 @@ function AdjustPage({ itemId }: { itemId: string }) {
       setItem(r.data);
     });
   }, [itemId]);
+  // Server-authoritative reload (R5 P1): cache can hold pre-commit state for
+  // seconds after a transaction lands. Used on timeout + meters-mismatch
+  // recovery so the operator never re-applies an adjustment that already
+  // succeeded. Returns true on success, false on server-read failure (caller
+  // shows "could not verify" — refusing any state is safer than wrong state).
+  const reloadItemFromServer = useCallback(async (): Promise<boolean> => {
+    setItem(undefined); setLoadError(null);
+    const r = await getItemByIdFromServer(itemId);
+    if (!r.ok) {
+      setItem(null);
+      setLoadError(`Could not verify the current on-hand from the server: ${r.error.message} (${r.error.code}). Refresh the page before retrying.`);
+      return false;
+    }
+    if (!r.data) { setItem(null); setLoadError('That item is missing or has been deleted.'); return false; }
+    setItem(r.data);
+    return true;
+  }, [itemId]);
   useEffect(() => { if (authUser !== undefined) reloadItem(); }, [authUser, reloadItem]);
 
   // /users/{uid}.displayName fetch — see file header re: PRJ-876.
@@ -224,8 +237,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
     [targetNewMeters, item],
   );
 
+  // Strict eq, not epsilon (R5 P2): the boundary's zero-delta gate is also
+  // strict, so legacy 3dp-drift items can be normalized via Set-to-exact.
   const previewValid = targetNewMeters !== null && !!item && targetNewMeters >= 0
-    && !meterEquals(targetNewMeters, item.remainingMeters);
+    && targetNewMeters !== item.remainingMeters;
   const noteTrimmed = note.trim();
   const noteValid = reason !== 'other' || (noteTrimmed.length >= NOTE_MIN_OTHER && noteTrimmed.length <= NOTE_MAX);
   const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc;
@@ -273,21 +288,20 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (timer !== null) window.clearTimeout(timer);
     setSubmitting(false); setConfirmOpen(false);
     if (!r.ok) {
-      // Timeout: do NOT infer success (lead Codex R3 P2 — coincident concurrent
-      // write could mis-attribute; needs per-call correlation id, schema change
-      // out of scope). Refresh + verify-before-retry message instead.
+      // Timeout: do NOT infer success (R3 P2). Use server-authoritative read
+      // (R5 P1) so a stale cache doesn't push the operator into double-applying
+      // an adjustment that already landed.
       if (r.error.code === 'timeout') {
-        void reloadItem();
         setMetersInput('');
         setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
+        void reloadItemFromServer();
         return;
       }
-      // Concurrent edit (R3 P1): clear input so Sold tab doesn't recompute
-      // against the new on-hand and double-debit.
+      // Concurrent edit (R3 P1) — same server-read for the same reason (R5 P1).
       if (r.error.code === 'meters-mismatch') {
         setMetersInput('');
-        reloadItem();
         setSubmitError('Stock changed in another session. Check the new on-hand and re-enter your adjustment.');
+        void reloadItemFromServer();
         return;
       }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
@@ -299,7 +313,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
-  }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItem]);
+  }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
 
   const onUndo = useCallback(async () => {
     if (!lastMovement || !authUser || !userDoc || !item) return;
@@ -325,7 +339,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // Same in-place update pattern as onConfirm — avoid the unmount race.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setSnack('Undone.');
-  }, [lastMovement, authUser, userDoc, item, reloadItem]);
+  }, [lastMovement, authUser, userDoc, item]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
     // submitError stays above the loading shell so meters-mismatch/timeout
@@ -363,7 +377,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const onHand = item.remainingMeters;
   const previewLabel = targetNewMeters === null ? formatMeters(onHand) : `${formatMeters(onHand)} → ${formatMeters(targetNewMeters)}`;
   const deltaLabel = delta === null ? '' : `${delta > 0 ? '+' : ''}${formatMeters(delta).replace(/^-/, '−')}`;
-  const noChange = targetNewMeters !== null && meterEquals(targetNewMeters, onHand);
+  const noChange = targetNewMeters !== null && targetNewMeters === onHand;
   const deltaClass = delta === null || noChange ? 'bg-gray-100 text-gray-600'
     : delta > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
   const saveLabel = targetNewMeters === null ? 'Save' : `Save ${formatMeters(onHand)} → ${formatMeters(targetNewMeters)}`;
