@@ -83,25 +83,44 @@ function mapErrorCode(code: string, fallback: string): string {
 // state. Polls `findMovementByCorrelationId` up to `RECONCILE_MAX_ATTEMPTS`
 // times, with `RECONCILE_RETRY_DELAY_MS` between probes, to absorb the
 // window where a transaction commit lands AFTER the client-side timeout
-// fires. Returns the found Movement, `null` for confirmed-not-committed,
-// or 'inconclusive' if every probe errored (caller falls back to
-// "verify on-hand" — never auto-success on a query failure).
+// fires.
+//
+// Two-outcome reconcile (R1 P1.b / lead Codex round 1):
+//   - 'found'         → server returned the movement; positive proof of
+//                       commit. UI can safely show "Saved" + Undo using
+//                       the SERVER-AUTHORITATIVE values.
+//   - 'inconclusive'  → no commit observed yet (every probe returned
+//                       null cleanly) OR a probe errored. We do NOT
+//                       collapse all-null to "not-committed": absence of
+//                       evidence is not evidence of absence. The
+//                       original `createMovementAndAdjustItem` promise
+//                       can still be in flight and commit AFTER the
+//                       second null poll on a slow / retried connection.
+//                       Declaring 'not-committed' from absence would
+//                       create a real double-apply window — operator
+//                       retries, original write lands later, item state
+//                       corrupted. UI shows the conservative "may or
+//                       may not have gone through — verify on-hand,
+//                       then re-enter only if needed" message and
+//                       withholds Undo. Confirmed-not-committed (with
+//                       safe-to-retry semantics) requires write-side
+//                       idempotency; deferred to a follow-up ticket.
 async function reconcileTimedOutSave(
   itemId: string,
   clientCorrelationId: string,
-): Promise<{ kind: 'found'; movement: Movement } | { kind: 'not-committed' } | { kind: 'inconclusive' }> {
-  let sawError = false;
+  actorUid: string,
+): Promise<{ kind: 'found'; movement: Movement } | { kind: 'inconclusive' }> {
   for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    const r = await findMovementByCorrelationId(itemId, clientCorrelationId);
-    if (!r.ok) { sawError = true; continue; }
-    if (r.data !== null) return { kind: 'found', movement: r.data };
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
+    if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
+    // r.ok && r.data === null  → not yet observed; keep polling.
+    // !r.ok                    → probe errored; keep polling.
+    // Either way, fall through to the next attempt.
   }
-  // All attempts returned `null` (no error) → confirmed not committed.
-  // Any attempt errored AND none found → inconclusive (degraded mode).
-  return sawError ? { kind: 'inconclusive' } : { kind: 'not-committed' };
+  return { kind: 'inconclusive' };
 }
 
 function useOnline(): boolean {
@@ -342,15 +361,17 @@ function AdjustPage({ itemId }: { itemId: string }) {
       // timeout fires before the server has acknowledged commit, but the
       // transaction may still be in flight. Query `/movements` for the
       // correlation id we wrote into `params.clientCorrelationId`:
-      // - found: authoritative success — restore the snackbar + Undo.
-      // - not-committed (every probe returned null cleanly): safe to
-      //   retry without double-application risk.
-      // - inconclusive (probe(s) errored — e.g. composite index still
-      //   building, network blip): fall back to the conservative
-      //   "verify on-hand" message; never auto-success on a query
-      //   error. Operator agency preserved.
+      // - found: authoritative proof of commit — restore snackbar + Undo
+      //   using the server-authoritative movement values.
+      // - inconclusive: NO positive proof of commit (all probes null
+      //   and/or errored). Show conservative "may or may not have gone
+      //   through" message and withhold Undo. We do NOT claim the write
+      //   failed — the original transaction can still commit after any
+      //   number of null polls, and a "safe to retry" claim would create
+      //   a real double-apply window. Confirmed-not-committed semantics
+      //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        const outcome = await reconcileTimedOutSave(item.itemId, correlationId);
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
         if (outcome.kind === 'found') {
           // Late-success path — restore the 15-sec Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/
@@ -363,16 +384,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
           setMetersInput(''); setReason(null); setNote('');
           return;
         }
-        if (outcome.kind === 'not-committed') {
-          setMetersInput('');
-          setSubmitError('Save did not go through. Safe to retry.');
-          void reloadItemFromServer();
-          return;
-        }
-        // outcome.kind === 'inconclusive' — degraded mode (e.g. index
-        // building, transient network failure on the reconcile probe).
+        // outcome.kind === 'inconclusive' — could still be in flight
+        // server-side. Mirror PRJ-787's pre-PRJ-883 conservative posture:
+        // operator must verify on-hand before re-entering. NO Undo
+        // affordance, NO "safe to retry" claim.
         setMetersInput('');
-        setSubmitError('Save took too long. The change may or may not have gone through. Refresh the page to see the latest stock value before adjusting again.');
+        setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
         void reloadItemFromServer();
         return;
       }

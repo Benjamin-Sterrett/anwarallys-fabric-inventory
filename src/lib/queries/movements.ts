@@ -11,6 +11,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDocsFromServer,
   limit as queryLimit,
   orderBy,
   query,
@@ -259,31 +260,50 @@ export async function listMovementsForItem(
  * caller's pre-generated `clientCorrelationId`, returns the matching
  * Movement (if it committed) or `null` (if no doc exists yet).
  *
- * Doubly-scoped by `itemId` for ownership safety: even though
- * `clientCorrelationId` is user-supplied, the rules enforce
- * `actorUid == auth.uid` on movement create, so a found doc could only
- * have been written by the current user. The `itemId` filter narrows
- * the lookup to the save attempt's intended target — a stray collision
- * (already vanishingly unlikely with v4 UUIDs) on a different item is
- * impossible to mistake for "this save".
+ * Server-only read (R1 P1): uses `getDocsFromServer` rather than
+ * `getDocs`. Same reasoning as `getItemByIdFromServer` (PRJ-787 R5):
+ * the persistent local cache can hold a pending `/movements` write for
+ * several seconds before the server ACKs. A cache-satisfied lookup
+ * could return `found` for a write that may still fail or never reach
+ * Firestore — that would let the UI claim "Saved" for an uncommitted
+ * write. Caller MUST handle `firestore/unavailable` (offline / no
+ * server reachable) — there is no cache fallback by design.
+ *
+ * Triply-scoped for ownership safety:
+ *   - `clientCorrelationId` (user-supplied UUID v4)
+ *   - `itemId` (narrows to the save attempt's intended target)
+ *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
+ *      by any active staff and Rules only validate `clientCorrelationId`
+ *      as a non-empty string. A devtools-savvy staff member could copy
+ *      another's correlation id; if their own write times out, the
+ *      reconcile lookup could return the copied movement → false
+ *      late-success / Undo state for a write that never happened. Rules
+ *      already enforce `actorUid == auth.uid` on movements/create, so
+ *      forging the field on WRITE is impossible — but READ access is
+ *      shared. The `actorUid` equality filter closes that read-side
+ *      leak. Caller passes the current user's uid.)
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query
  * failure. Intended call sequence: timeout fires → poll this function
- * once → wait grace period → poll once more → if still null, treat as
- * confirmed not committed.
+ * once → wait grace period → poll once more → if still null treat as
+ * inconclusive (NOT confirmed-not-committed; the original transaction
+ * promise can still commit AFTER any number of null polls).
  *
  * Errors: `invalid-correlation-id`, `firestore/no-db`,
  * `firestore/init-failed`, `firestore/<FirestoreErrorCode>` (e.g.
  * `firestore/permission-denied`, `firestore/failed-precondition` for
- * missing composite index), `firestore/unknown`.
+ * missing composite index, `firestore/unavailable` when offline),
+ * `firestore/unknown`.
  */
 export async function findMovementByCorrelationId(
   itemId: string,
   clientCorrelationId: string,
+  actorUid: string,
 ): Promise<Result<Movement | null>> {
   if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
   if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
+  if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
 
   let db: Firestore;
   try {
@@ -299,9 +319,10 @@ export async function findMovementByCorrelationId(
       collection(db, 'movements').withConverter(movementConverter),
       where('clientCorrelationId', '==', clientCorrelationId),
       where('itemId', '==', itemId),
+      where('actorUid', '==', actorUid),
       queryLimit(1),
     );
-    const docs = (await getDocs(q)).docs;
+    const docs = (await getDocsFromServer(q)).docs;
     return ok(docs.length === 0 ? null : (docs[0]?.data() ?? null));
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);

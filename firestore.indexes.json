@@ -48,7 +48,8 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "clientCorrelationId", "order": "ASCENDING" },
-        { "fieldPath": "itemId", "order": "ASCENDING" }
+        { "fieldPath": "itemId", "order": "ASCENDING" },
+        { "fieldPath": "actorUid", "order": "ASCENDING" }
       ]
     }
   ],
