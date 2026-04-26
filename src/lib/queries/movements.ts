@@ -288,14 +288,21 @@ export async function listMovementsForItem(
  *      ids — capture from devtools, then craft a new save with the same
  *      value. The reconcile lookup would return the OLDER movement,
  *      causing a false late-success for the new write. Time-bounding by
- *      the current attempt's start timestamp eliminates that vector:
- *      the older movement's `at` is < `since`, so the query won't match
- *      it. Combined with v4 UUID uniqueness, the chance of a false
- *      match is effectively zero. Caller captures `since` BEFORE the
- *      `Promise.race` with the timeout and passes the same value to
- *      every poll. Equality fields first, range field last — required
- *      shape for Firestore composite indexes with N equalities + 1
- *      range filter.)
+ *      a recent server-stamped reference eliminates that vector: the
+ *      older movement's `at` is < `since`, so the query won't match it.
+ *      Combined with v4 UUID uniqueness, the chance of a false match is
+ *      effectively zero. **`since` MUST be a server-stamped Timestamp**
+ *      (e.g. the pre-save `RollItem.updatedAt`) — NOT a client wall-clock
+ *      value (R3 P2 / lead Codex round 3). `Movement.at` is stamped by
+ *      the server; comparing it to a client clock breaks on devices
+ *      whose wall-clock runs ahead of Firestore (common on older
+ *      Androids) — a successful save can commit with server-time
+ *      `at < since` and the lookup misses it, dropping the operator
+ *      into inconclusive when the save actually landed. A wider bound
+ *      (older `updatedAt`) is harmless — it doesn't miss successful
+ *      writes; only narrower-than-server-time bounds are unsafe.
+ *      Equality fields first, range field last — required shape for
+ *      Firestore composite indexes with N equalities + 1 range filter.)
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query

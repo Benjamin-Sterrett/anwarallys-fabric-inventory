@@ -116,10 +116,14 @@ async function reconcileTimedOutSave(
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    // `since` is captured ONCE before the timeout race and reused on
-    // every poll (R2 P2 / lead Codex round 2). Time-bounding by the
-    // current attempt's start ts makes deliberate correlation-id replay
-    // attacks return `null` rather than an older movement.
+    // `since` is server-stamped (`item.updatedAt`, R3 P2 / lead Codex
+    // round 3) and reused on every poll. Server-anchoring eliminates
+    // client clock-skew false negatives that would have let a successful
+    // save commit with `at < since` (when the device clock runs ahead of
+    // Firestore). Time-bounding still defeats deliberate correlation-id
+    // replay: an older movement's `at` is < `since`, so the query won't
+    // match it — combined with v4 UUID uniqueness, false matches are
+    // effectively impossible.
     const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid, since);
     if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
     // r.ok && r.data === null  → not yet observed; keep polling.
@@ -351,12 +355,25 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // the client-side timeout fires before the boundary's success
     // result lands. Fresh per attempt — never replayed across saves.
     const correlationId = crypto.randomUUID();
-    // R2 P2 / lead Codex round 2: capture attempt-start timestamp BEFORE
-    // the Promise.race so the reconcile-query can time-bound `at >= since`.
-    // Closes the deliberate-replay attack: a staff member capturing one of
-    // their own earlier correlation ids cannot make the reconcile lookup
-    // resolve to that older movement (its `at` is < this attempt's start).
-    const attemptStart = Timestamp.fromDate(new Date());
+    // R3 P2 / lead Codex round 3: anchor the reconcile time-bound to the
+    // server-stamped `item.updatedAt` rather than a client wall-clock
+    // value (`Timestamp.fromDate(new Date())`). Movement.at is stamped by
+    // the server; comparing it to a client clock is unsafe on devices
+    // whose wall-clock runs ahead of NTP/Firestore (common on older
+    // Androids) — a successful save can commit with `at < since` (server
+    // time) and the reconcile lookup misses it. `item.updatedAt` is the
+    // server-stamped timestamp from the most recent item read; any
+    // successful save updates the item in the same transaction as the
+    // movement create, so the new movement's `at` is necessarily
+    // >= item.updatedAt. Both timestamps are server-time → clock skew
+    // on the device is irrelevant. Bound may be wider than the actual
+    // attempt's start (if the page has been open a long time); that's
+    // safe — wider doesn't miss successful writes. Replay defense
+    // remains: actor-scoped query + v4 UUID uniqueness are the
+    // primary protections; the time-bound is defense-in-depth.
+    const reconcileSince: Timestamp = item.updatedAt instanceof Timestamp
+      ? item.updatedAt
+      : Timestamp.fromMillis(0);
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -391,7 +408,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       //   a real double-apply window. Confirmed-not-committed semantics
       //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid, attemptStart);
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid, reconcileSince);
         if (outcome.kind === 'found') {
           // Late-success path — restore the 15-sec Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/
