@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
@@ -109,12 +110,17 @@ async function reconcileTimedOutSave(
   itemId: string,
   clientCorrelationId: string,
   actorUid: string,
+  since: Timestamp,
 ): Promise<{ kind: 'found'; movement: Movement } | { kind: 'inconclusive' }> {
   for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
+    // `since` is captured ONCE before the timeout race and reused on
+    // every poll (R2 P2 / lead Codex round 2). Time-bounding by the
+    // current attempt's start ts makes deliberate correlation-id replay
+    // attacks return `null` rather than an older movement.
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid, since);
     if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
     // r.ok && r.data === null  → not yet observed; keep polling.
     // !r.ok                    → probe errored; keep polling.
@@ -252,6 +258,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
   const [lastMovement, setLastMovement] = useState<{ movementId: string; oldMeters: number; newMeters: number } | null>(null);
+  // R2 P1 / lead Codex round 2: when the timeout-reconcile probe is
+  // inconclusive, the on-screen on-hand cannot be trusted (the original
+  // transaction can still commit AFTER our last poll, so a fresh
+  // server read can return PRE-commit meters). The only safe posture is
+  // to disable the form and force the operator to manually reload —
+  // page reload guarantees a fresh snapshot after the SDK has had time
+  // to settle the in-flight transaction. There is no auto-recovery.
+  const [inconclusivePending, setInconclusivePending] = useState(false);
 
   useEffect(() => {
     if (!lastMovement) return;
@@ -296,7 +310,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     && targetNewMeters !== item.remainingMeters;
   const noteTrimmed = note.trim();
   const noteValid = reason !== 'other' || (noteTrimmed.length >= NOTE_MIN_OTHER && noteTrimmed.length <= NOTE_MAX);
-  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc;
+  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc && !inconclusivePending;
 
   const stepBy = useCallback((amount: number) => {
     setMetersInput((cur) => {
@@ -337,6 +351,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // the client-side timeout fires before the boundary's success
     // result lands. Fresh per attempt — never replayed across saves.
     const correlationId = crypto.randomUUID();
+    // R2 P2 / lead Codex round 2: capture attempt-start timestamp BEFORE
+    // the Promise.race so the reconcile-query can time-bound `at >= since`.
+    // Closes the deliberate-replay attack: a staff member capturing one of
+    // their own earlier correlation ids cannot make the reconcile lookup
+    // resolve to that older movement (its `at` is < this attempt's start).
+    const attemptStart = Timestamp.fromDate(new Date());
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -371,7 +391,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       //   a real double-apply window. Confirmed-not-committed semantics
       //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid, attemptStart);
         if (outcome.kind === 'found') {
           // Late-success path — restore the 15-sec Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/
@@ -385,12 +405,17 @@ function AdjustPage({ itemId }: { itemId: string }) {
           return;
         }
         // outcome.kind === 'inconclusive' — could still be in flight
-        // server-side. Mirror PRJ-787's pre-PRJ-883 conservative posture:
-        // operator must verify on-hand before re-entering. NO Undo
-        // affordance, NO "safe to retry" claim.
-        setMetersInput('');
-        setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
-        void reloadItemFromServer();
+        // server-side (R2 P1 / lead Codex round 2: the original
+        // transaction can still commit AFTER our last poll, so even a
+        // fresh server-read of the item could return PRE-commit meters
+        // — operator would re-enter from a stale on-hand and double-
+        // apply once the original lands). The only safe posture is to
+        // disable the form entirely and force the operator to reload
+        // the page manually. Page reload guarantees a fresh snapshot
+        // after the SDK has had time to settle the in-flight tx. NO
+        // auto-recovery, NO Undo affordance, NO "safe to retry" claim.
+        setInconclusivePending(true);
+        setSubmitError('Save took too long. The change may or may not have gone through. Reload this page to see the actual on-hand value before making any further changes.');
         return;
       }
       // Concurrent edit (R3 P1) — same server-read for the same reason (R5 P1).
@@ -510,8 +535,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
       <div className="mb-4 inline-flex rounded-md border border-gray-300 bg-white" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'sold'} onClick={() => onTab('sold')}
+          disabled={inconclusivePending}
           className={`${BTN_BASE} ${tab === 'sold' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Sold / used</button>
         <button type="button" role="tab" aria-selected={tab === 'exact'} onClick={() => onTab('exact')}
+          disabled={inconclusivePending}
           className={`${BTN_BASE} ${tab === 'exact' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Set to exact</button>
       </div>
 
@@ -524,13 +551,16 @@ function AdjustPage({ itemId }: { itemId: string }) {
             <button type="button" aria-label="Decrease"
               onPointerDown={() => startStep(-STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
+              disabled={inconclusivePending}
               className={`${BTN_SECONDARY} px-4`}>−</button>
             <input type="text" inputMode="decimal" autoComplete="off"
               value={metersInput} onChange={(e) => setMetersInput(e.target.value)}
-              placeholder="0" className={`${INPUT} flex-1 text-center text-lg`} />
+              disabled={inconclusivePending}
+              placeholder="0" className={`${INPUT} flex-1 text-center text-lg disabled:bg-gray-100 disabled:opacity-50`} />
             <button type="button" aria-label="Increase"
               onPointerDown={() => startStep(STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
+              disabled={inconclusivePending}
               className={`${BTN_SECONDARY} px-4`}>+</button>
           </div>
         </label>
@@ -550,6 +580,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
             const selected = reason === r.value;
             return (
               <button key={r.value} type="button" onClick={() => setReason(r.value)} aria-pressed={selected}
+                disabled={inconclusivePending}
                 className={`${BTN_BASE} ${selected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-800'} px-4 py-2`}>
                 {r.label}
               </button>
@@ -562,7 +593,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
         <label className="mb-4 block">
           <span className="text-sm font-medium text-gray-800">Note (required)</span>
           <textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, NOTE_MAX))}
-            rows={2} maxLength={NOTE_MAX} placeholder="What happened?" className={INPUT} />
+            disabled={inconclusivePending}
+            rows={2} maxLength={NOTE_MAX} placeholder="What happened?" className={`${INPUT} disabled:bg-gray-100 disabled:opacity-50`} />
           <span className="mt-1 block text-xs text-gray-600">
             {noteTrimmed.length}/{NOTE_MAX} — at least {NOTE_MIN_OTHER} characters.
           </span>
@@ -572,7 +604,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
       {submitError ? <p className="mb-3 text-sm text-red-700" role="alert">{submitError}</p> : null}
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
+        {inconclusivePending ? (
+          // R2 P1 / lead Codex round 2: only safe action is a hard
+          // page reload — guarantees a fresh server snapshot of
+          // remainingMeters after any in-flight tx has settled.
+          <button type="button" onClick={() => window.location.reload()} className={BTN_PRIMARY}>Reload page</button>
+        ) : (
+          <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
+        )}
         <button type="button" onClick={() => navigate(-1)} className={BTN_SECONDARY}>Cancel</button>
       </div>
 

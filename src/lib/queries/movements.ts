@@ -17,6 +17,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  Timestamp,
   where,
   type DocumentReference,
   type Firestore,
@@ -269,7 +270,7 @@ export async function listMovementsForItem(
  * write. Caller MUST handle `firestore/unavailable` (offline / no
  * server reachable) — there is no cache fallback by design.
  *
- * Triply-scoped for ownership safety:
+ * Quadruply-scoped for ownership + replay safety:
  *   - `clientCorrelationId` (user-supplied UUID v4)
  *   - `itemId` (narrows to the save attempt's intended target)
  *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
@@ -282,6 +283,19 @@ export async function listMovementsForItem(
  *      forging the field on WRITE is impossible — but READ access is
  *      shared. The `actorUid` equality filter closes that read-side
  *      leak. Caller passes the current user's uid.)
+ *   - `at >= since` (R2 P2 / lead Codex round 2: even with actor-scope,
+ *      a staff member can replay one of their OWN earlier correlation
+ *      ids — capture from devtools, then craft a new save with the same
+ *      value. The reconcile lookup would return the OLDER movement,
+ *      causing a false late-success for the new write. Time-bounding by
+ *      the current attempt's start timestamp eliminates that vector:
+ *      the older movement's `at` is < `since`, so the query won't match
+ *      it. Combined with v4 UUID uniqueness, the chance of a false
+ *      match is effectively zero. Caller captures `since` BEFORE the
+ *      `Promise.race` with the timeout and passes the same value to
+ *      every poll. Equality fields first, range field last — required
+ *      shape for Firestore composite indexes with N equalities + 1
+ *      range filter.)
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query
@@ -300,10 +314,12 @@ export async function findMovementByCorrelationId(
   itemId: string,
   clientCorrelationId: string,
   actorUid: string,
+  since: Timestamp,
 ): Promise<Result<Movement | null>> {
   if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
   if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
   if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
+  if (!(since instanceof Timestamp)) return err('invalid-correlation-id', 'since must be a Firestore Timestamp.');
 
   let db: Firestore;
   try {
@@ -320,6 +336,7 @@ export async function findMovementByCorrelationId(
       where('clientCorrelationId', '==', clientCorrelationId),
       where('itemId', '==', itemId),
       where('actorUid', '==', actorUid),
+      where('at', '>=', since),
       queryLimit(1),
     );
     const docs = (await getDocsFromServer(q)).docs;
