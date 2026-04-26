@@ -1,12 +1,10 @@
 // Movements — safety-critical. `createMovementAndAdjustItem` is the ONLY
-// path that writes `RollItem.remainingMeters`. Don't add convenience
-// setters.
+// path that writes `RollItem.remainingMeters`. Don't add setters.
 //
-// Optimistic concurrency: caller passes `expectedOldMeters` (the value
-// the user saw). `tx.get` then compare to the live doc; mismatch =>
-// `meters-mismatch`. No `increment()` — it would apply a delta on top of
-// whatever's at commit time, so "set to 90m" could silently produce 80m
-// when a concurrent edit already moved the value to 90m.
+// Optimistic concurrency: caller passes `expectedOldMeters` (the value the
+// user saw). Mismatch in-tx => `meters-mismatch`. No `increment()` — it
+// would apply a delta on top of whatever's at commit time, so "set to
+// 90m" could silently produce 80m on a concurrent edit.
 
 import {
   collection,
@@ -39,25 +37,32 @@ export interface AdjustStockParams {
 // Sentinels thrown inside the transaction; outer catch maps them.
 const ITEM_MISSING = 'item-missing';
 const METERS_MISMATCH = 'meters-mismatch';
+const INVALID_METERS = 'invalid-meters';
+
+function isValidMeters(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0;
+}
 
 /**
- * Atomically validate the live item, write the `Movement` audit record,
- * and update `RollItem.remainingMeters` — all in one Firestore transaction.
+ * Atomically validate, write `Movement`, and update
+ * `RollItem.remainingMeters` in one Firestore transaction. Fractional
+ * meters are valid (12.5m is a normal cut).
  *
- * Errors: `item-missing` (gone/soft-deleted), `meters-mismatch` (concurrent
- * edit), `firestore/transaction-failed` (everything else).
+ * Errors: `firestore/no-db`, `invalid-meters` (params or live doc corrupt
+ * — `NaN` would permanently break `!== expectedOldMeters` and brick the
+ * roll), `item-missing`, `meters-mismatch`, `firestore/transaction-failed`.
  */
 export async function createMovementAndAdjustItem(
   params: AdjustStockParams,
 ): Promise<Result<{ movementId: string; newMeters: number }>> {
+  if (!isValidMeters(params.newMeters)) return err('invalid-meters', 'newMeters must be a finite, non-negative number.');
+  if (!isValidMeters(params.expectedOldMeters)) return err('invalid-meters', 'expectedOldMeters must be a finite, non-negative number.');
+
   const db = getDb();
   if (!db) return err('firestore/no-db', 'Firebase is not configured.');
 
   const itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
-  // Auto-ID allocated locally so the transaction can reference it.
-  const movementRef = doc(collection(db, 'movements')).withConverter(
-    movementConverter,
-  );
+  const movementRef = doc(collection(db, 'movements')).withConverter(movementConverter);
 
   try {
     const result = await runTransaction(db, async (tx) => {
@@ -65,13 +70,13 @@ export async function createMovementAndAdjustItem(
       if (!snap.exists()) throw new Error(ITEM_MISSING);
       const liveItem = snap.data();
       if (liveItem.deletedAt !== null) throw new Error(ITEM_MISSING);
-      if (liveItem.remainingMeters !== params.expectedOldMeters) {
-        throw new Error(METERS_MISMATCH);
-      }
+      // Live-doc corruption recovery — NaN would brick the roll.
+      if (!isValidMeters(liveItem.remainingMeters)) throw new Error(INVALID_METERS);
+      if (liveItem.remainingMeters !== params.expectedOldMeters) throw new Error(METERS_MISMATCH);
 
       const deltaMeters = params.newMeters - liveItem.remainingMeters;
 
-      // Denormalize folder context — audit trail survives later item moves.
+      // Denormalize folder context — audit trail survives item moves.
       const movementPayload = {
         movementId: movementRef.id,
         itemId: params.itemId,
@@ -87,12 +92,7 @@ export async function createMovementAndAdjustItem(
         at: serverTimestamp(),
       };
 
-      // Item first, movement second — Firestore commits both atomically.
-      tx.update(itemRef, {
-        remainingMeters: params.newMeters,
-        updatedAt: serverTimestamp(),
-        updatedBy: params.actorUid,
-      });
+      tx.update(itemRef, { remainingMeters: params.newMeters, updatedAt: serverTimestamp(), updatedBy: params.actorUid });
       tx.set(movementRef, movementPayload);
 
       return { movementId: movementRef.id, newMeters: params.newMeters };
@@ -102,23 +102,24 @@ export async function createMovementAndAdjustItem(
     const message = e instanceof Error ? e.message : String(e);
     if (message === ITEM_MISSING) return err('item-missing', 'The item is missing or has been deleted.');
     if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
+    if (message === INVALID_METERS) return err('invalid-meters', 'Live remainingMeters is not a finite, non-negative number.');
     return err('firestore/transaction-failed', message);
   }
 }
 
 export interface MovementsPage {
   items: Movement[];
-  /** True when `items.length === pageSize`; caller should fetch the next page. */
+  /** Authoritative — true iff more results exist beyond this page. */
   hasMore: boolean;
-  /** Pass to a future `startAfter` param to fetch the next page. */
+  /** Last doc on this page, for the future `startAfter` param. `null` when no next page. */
   lastCursor: QueryDocumentSnapshot<Movement> | null;
 }
 
 /**
- * Movement history, newest first. Caller MUST pass `pageSize` — no
- * default. Audit-trail invariant: never silently drop older movements.
- * Single-page only for now; PRJ-789 adds a `startAfter` param that
- * consumes `lastCursor`. `hasMore === true` means more results exist.
+ * Movement history, newest first. Caller MUST pass `pageSize` (no
+ * default — audit-trail invariant: never silently truncate). `hasMore`
+ * is authoritative: we fetch `pageSize + 1` and trim. Single-page only
+ * for now; PRJ-789 adds `startAfter` consuming `lastCursor`.
  */
 export async function listMovementsForItem(
   itemId: string,
@@ -131,16 +132,14 @@ export async function listMovementsForItem(
       collection(db, 'movements').withConverter(movementConverter),
       where('itemId', '==', itemId),
       orderBy('at', 'desc'),
-      queryLimit(pageSize),
+      queryLimit(pageSize + 1), // +1 probes for "more"
     );
-    const snap = await getDocs(q);
-    const items = snap.docs.map((d) => d.data());
-    const lastDoc = snap.docs[snap.docs.length - 1] ?? null;
-    return ok({
-      items,
-      hasMore: snap.docs.length === pageSize,
-      lastCursor: lastDoc,
-    });
+    const docs = (await getDocs(q)).docs;
+    const hasMore = docs.length > pageSize;
+    const pageDocs = hasMore ? docs.slice(0, pageSize) : docs;
+    const lastCursor: QueryDocumentSnapshot<Movement> | null =
+      hasMore ? (pageDocs[pageDocs.length - 1] ?? null) : null;
+    return ok({ items: pageDocs.map((d) => d.data()), hasMore, lastCursor });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown Firestore error.';
     return err('firestore/list-movements-failed', message);

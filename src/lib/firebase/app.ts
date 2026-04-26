@@ -1,18 +1,14 @@
-// Single entry point for Firebase. Import this module FIRST in any module
-// that touches Firestore. Never call `getFirestore()` directly — always
-// use `getDb()`. ESLint rule (PRJ-842) will enforce this mechanically.
-//
-// `initializeFirestore(app, settings)` MUST run before the first
-// `getFirestore(app)` — the latter locks settings to defaults and any
-// later `initializeFirestore` throws `failed-precondition`. Both calls
-// live here so callers can't invert the order.
-//
-// Don't add `firebase-admin` (project invariant: client SDK only).
+// Single Firebase entry point. Use `getDb()` — never `getFirestore()`
+// directly (PRJ-842 will enforce). `initializeFirestore` MUST run before
+// the first `getFirestore(app)` (the latter locks settings to defaults
+// and a later `initializeFirestore` throws `failed-precondition`); both
+// live here so callers can't invert the order. No `firebase-admin`.
 
 import {
   initializeApp,
   getApp,
   getApps,
+  FirebaseError,
   type FirebaseApp,
 } from 'firebase/app';
 import {
@@ -46,11 +42,9 @@ function readConfig(): FirebaseWebConfig | null {
     .filter(([, v]) => !v)
     .map(([k]) => k);
   if (missing.length > 0) {
-    // Don't throw — CI builds have no .env.local. Callers handle null.
+    // CI builds have no .env.local — callers handle null.
     // eslint-disable-next-line no-console
-    console.warn(
-      `[firebase] Missing env vars: ${missing.join(', ')}. Firebase not initialized.`,
-    );
+    console.warn(`[firebase] Missing env vars: ${missing.join(', ')}. Firebase not initialized.`);
     return null;
   }
   return values as FirebaseWebConfig;
@@ -63,35 +57,35 @@ export function getFirebaseApp(): FirebaseApp | null {
   if (cachedApp) return cachedApp;
   const config = readConfig();
   if (!config) return null;
-  // HMR-safe: under Vite HMR `cachedApp` resets to null. The SDK's own
-  // registry (survives module reload) tells us if the default app exists.
+  // HMR-safe: SDK registry survives module reload.
   cachedApp = getApps().length > 0 ? getApp() : initializeApp(config);
   return cachedApp;
 }
 
 /**
- * The ONLY public Firestore accessor. Returns `null` when config is
- * missing. HMR-safe: detects re-eval via the SDK's app registry BEFORE
- * attempting `initializeFirestore`, so genuine init failures
- * (IndexedDB-disabled, storage quota) propagate visibly instead of
- * silently degrading to memory cache.
+ * The ONLY public Firestore accessor. `null` when config is missing.
+ * Catches the SDK's `failed-precondition` (HMR re-eval) and only that —
+ * IndexedDB / storage-quota errors propagate so configuration problems
+ * surface instead of silently degrading to memory cache.
  */
 export function getDb(): Firestore | null {
   if (cachedDb) return cachedDb;
-  // Snapshot registry state BEFORE `getFirebaseApp` so we can tell whether
-  // we created the app this lifecycle (fresh tab) or pulled it from the
-  // SDK registry (HMR re-eval — Firestore already initialized).
-  const appExisted = getApps().length > 0;
   const app = getFirebaseApp();
   if (!app) return null;
-  if (appExisted) {
-    cachedDb = getFirestore(app);
-  } else {
+  try {
     cachedDb = initializeFirestore(app, {
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
     });
+  } catch (e: unknown) {
+    // `failed-precondition` is the SDK's HMR-re-eval signal. Anything
+    // else (IndexedDB disabled, storage quota) must propagate.
+    if (e instanceof FirebaseError && e.code === 'failed-precondition') {
+      cachedDb = getFirestore(app);
+    } else {
+      throw e;
+    }
   }
   return cachedDb;
 }
