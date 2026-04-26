@@ -271,33 +271,30 @@ function AdjustPage({ itemId }: { itemId: string }) {
     const timeoutPromise = new Promise<{ ok: false; error: { code: string; message: string } }>((resolve) => {
       timer = window.setTimeout(() => resolve({ ok: false, error: { code: 'timeout', message: 'Save timed out.' } }), SAVE_TIMEOUT_MS);
     });
-    const oldMetersAtSubmit = item.remainingMeters;
-    const oldMovementIdAtSubmit = item.lastMovementId;
     const r = await Promise.race([createMovementAndAdjustItem(params), timeoutPromise]);
     if (timer !== null) window.clearTimeout(timer);
     setSubmitting(false); setConfirmOpen(false);
     if (!r.ok) {
-      // Timeout reconciliation (lead Codex R2 P2): the in-flight tx may
-      // commit after the race. One re-fetch; if lastMovementId advanced AND
-      // remainingMeters matches what we sent, treat as late success.
+      // Timeout: do NOT infer success (lead Codex R3 P2). A coincident write
+      // from another staff with the same final meters would falsely attach
+      // their movement to this save and let Undo reverse THEIR work. Proving
+      // authorship needs a per-call correlation id (Movement schema change —
+      // out of scope). Refresh + ask the operator to verify.
       if (r.error.code === 'timeout') {
-        const fresh = await getItemById(item.itemId);
-        if (fresh.ok && fresh.data && fresh.data.lastMovementId !== null
-            && fresh.data.lastMovementId !== oldMovementIdAtSubmit
-            && meterEquals(fresh.data.remainingMeters, targetNewMeters)) {
-          setItem(fresh.data);
-          setLastMovement({
-            movementId: fresh.data.lastMovementId,
-            oldMeters: oldMetersAtSubmit,
-            newMeters: fresh.data.remainingMeters,
-          });
-          setSnack(`Saved: ${formatMeters(oldMetersAtSubmit)} → ${formatMeters(fresh.data.remainingMeters)}`);
-          setMetersInput(''); setReason(null); setNote('');
-          return;
-        }
+        void reloadItem();
+        setMetersInput('');
+        setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
+        return;
+      }
+      // Concurrent edit (lead Codex R3 P1): clear metersInput so the Sold
+      // tab doesn't recompute against the new on-hand and double-debit.
+      if (r.error.code === 'meters-mismatch') {
+        setMetersInput('');
+        reloadItem();
+        setSubmitError('Stock changed in another session. Check the new on-hand and re-enter your adjustment.');
+        return;
       }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
-      if (r.error.code === 'meters-mismatch') reloadItem();
       return;
     }
     // In-place setItem from authoritative boundary return — no refetch on
