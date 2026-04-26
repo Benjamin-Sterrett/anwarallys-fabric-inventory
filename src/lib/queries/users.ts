@@ -165,22 +165,25 @@ export async function createStaffUser(
     const secondaryAuth = initializeAuth(secondaryApp, { persistence: inMemoryPersistence });
 
     let newUid: string;
+    let cred: import('firebase/auth').UserCredential;
     try {
-      const cred = await createUserWithEmailAndPassword(
+      cred = await createUserWithEmailAndPassword(
         secondaryAuth,
         params.email.trim(),
         params.password,
       );
       newUid = cred.user.uid;
-      await updateProfile(cred.user, { displayName: params.displayName.trim() });
-    } catch (e: unknown) {
-      // If user was created but updateProfile failed, delete orphan before
-      // returning so the admin can retry without hitting email-already-in-use.
-      const signedInUser = secondaryAuth.currentUser;
-      if (signedInUser) {
-        try { await deleteUser(signedInUser); } catch (_) { /* ignore */ }
+      try {
+        await updateProfile(cred.user, { displayName: params.displayName.trim() });
+      } catch (profileErr: unknown) {
+        // Best-effort: Firestore /users/{uid}.displayName is canonical.
+        // A missing Auth displayName does not break any app flow.
+        const profileMessage = profileErr instanceof Error ? profileErr.message : String(profileErr);
+        // eslint-disable-next-line no-console
+        console.warn('[createStaffUser] updateProfile best-effort failed:', profileMessage);
       }
-
+    } catch (e: unknown) {
+      // Only createUserWithEmailAndPassword failures reach here.
       // Auth network/timeout errors leave the account state UNKNOWN; admin
       // must verify in Firebase Console before retrying (a blind retry
       // would hit `auth/email-already-in-use` on an orphan).
