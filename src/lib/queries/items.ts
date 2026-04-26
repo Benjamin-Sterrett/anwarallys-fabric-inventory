@@ -6,8 +6,8 @@
 
 import { FirebaseError } from 'firebase/app';
 import {
-  addDoc, collection, doc, getDoc, getDocFromServer, getDocs, orderBy, query,
-  serverTimestamp, updateDoc, where, type Firestore,
+  addDoc, collection, doc, getDoc, getDocFromServer, getDocs, onSnapshot, orderBy, query,
+  serverTimestamp, updateDoc, where, type Firestore, type Unsubscribe,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter } from '@/lib/firebase/converters';
@@ -131,6 +131,55 @@ export async function listActiveItemsInFolder(folderId: string): Promise<Result<
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * Live subscription to active items directly in `folderId`. Sorted by sku asc.
+ * Returns an SDK `Unsubscribe`; caller MUST invoke on cleanup. On `getDb()`
+ * failure the returned unsubscribe is a no-op and `onError` fires once on the
+ * next microtask. Errors via `onError`: `firestore/no-db`,
+ * `firestore/init-failed`, `firestore/<FirestoreErrorCode>`.
+ */
+export function subscribeToActiveItemsInFolder(
+  folderId: string,
+  onNext: (items: RollItem[]) => void,
+  onError: (error: { code: string; message: string }) => void,
+): Unsubscribe {
+  if (!isNonEmpty(folderId)) {
+    queueMicrotask(() => onError({ code: 'invalid-input', message: 'folderId is required.' }));
+    return () => undefined;
+  }
+
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) {
+      queueMicrotask(() =>
+        onError({ code: 'firestore/no-db', message: 'Firebase is not configured.' }),
+      );
+      return () => undefined;
+    }
+    db = maybeDb;
+  } catch (e: unknown) {
+    queueMicrotask(() =>
+      onError({
+        code: 'firestore/init-failed',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return () => undefined;
+  }
+
+  const q = query(
+    collection(db, 'items').withConverter(itemConverter),
+    where('folderId', '==', folderId),
+    where('deletedAt', '==', null),
+    orderBy('sku'),
+  );
+  return onSnapshot(q, {
+    next: (snap) => onNext(snap.docs.map((d) => d.data())),
+    error: (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
+  });
 }
 
 /** `folderAncestors` = parent.ancestors ++ [folderId] (rules re-derive). */

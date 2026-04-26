@@ -13,7 +13,7 @@ import {
   countActiveItemsInSubtree,
   createFolder,
   getFolderById,
-  listActiveItemsInFolder,
+  subscribeToActiveItemsInFolder,
   subscribeToFolderChildren,
 } from '@/lib/queries';
 import type { Folder, RollItem } from '@/lib/models';
@@ -212,20 +212,24 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
     );
   }, [parentId, retryToken, authUser]);
 
-  // PRJ-784: items directly in this folder (one-shot; refetched on retry).
+  // PRJ-879: live items subscription in this folder.
   const [items, setItems] = useState<RollItem[] | undefined>(undefined);
   const [itemsError, setItemsError] = useState<string | null>(null);
   useEffect(() => {
     if (authUser === undefined || parentId === null) { setItems([]); setItemsError(null); return; }
-    let cancelled = false;
     setItems(undefined);
     setItemsError(null);
-    void listActiveItemsInFolder(parentId).then((r) => {
-      if (cancelled) return;
-      if (r.ok) { setItems(r.data); }
-      else { setItems([]); setItemsError(`Could not load items: ${r.error.message} (${r.error.code})`); }
-    });
-    return () => { cancelled = true; };
+    return subscribeToActiveItemsInFolder(
+      parentId,
+      (next) => {
+        setItems(next);
+        setItemsError(null);
+      },
+      (e) => {
+        setItems([]);
+        setItemsError(`Could not load items: ${e.message} (${e.code})`);
+      },
+    );
   }, [parentId, authUser, retryToken]);
 
   const [addOpen, setAddOpen] = useState(false);
