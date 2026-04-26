@@ -144,6 +144,14 @@ export interface Movement {
   /** Denormalized display name; survives user deletion. */
   actorName: string;
   at: ServerTimestamp;
+  /**
+   * Typed back-reference for the Undo path (PRJ-890). Set to the
+   * `movementId` of the movement this one reverses; `null` for normal
+   * (non-reversal) movements. Replaces the prior locale-fragile
+   * `note: "Undo of <id>"` string convention. PRJ-789's item-detail page
+   * uses this for "Undone" badges via a single index lookup, not a parse.
+   */
+  reversesMovementId: string | null;
 }
 
 /**
