@@ -188,3 +188,28 @@ export interface DeletedRecord {
   folderIdAtDelete: string;
   folderAncestorsAtDelete: string[];
 }
+
+/**
+ * Staff/admin profile doc at `/users/{uid}` (PRJ-856). Auth UID = doc ID.
+ * `email` is denormalized for display; Firebase Auth is source of truth.
+ * Rules require admin-only writes + `email_verified` on the admin token
+ * (firestore.rules `isAdminUser()`).
+ *
+ * `isActive == true` gates `isActiveStaff()` (Rules) for read/write on
+ * inventory collections. Deactivation flips to false and revokes access
+ * on the next request — no token refresh needed.
+ *
+ * `displayName` is denormalized into `Movement.actorName` at write time;
+ * historical movements keep the old name after a rename. By design
+ * (synthesis §1; firestore.rules movements create rule).
+ */
+export interface User {
+  uid: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
+  createdAt: ServerTimestamp;
+  updatedAt: ServerTimestamp;
+  createdBy: string;
+  updatedBy: string;
+}

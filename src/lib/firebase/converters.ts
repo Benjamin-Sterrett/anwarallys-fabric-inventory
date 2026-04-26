@@ -17,7 +17,7 @@ import {
   type SnapshotOptions,
   type WithFieldValue,
 } from 'firebase/firestore';
-import type { Folder, RollItem, Movement, DeletedRecord } from '@/lib/models';
+import type { Folder, RollItem, Movement, DeletedRecord, User } from '@/lib/models';
 
 export const folderConverter: FirestoreDataConverter<Folder> = {
   toFirestore(folder: WithFieldValue<Folder>): DocumentData {
@@ -114,6 +114,28 @@ export const deletedRecordConverter: FirestoreDataConverter<DeletedRecord> = {
       expireAt: d.expireAt,
       folderIdAtDelete: d.folderIdAtDelete,
       folderAncestorsAtDelete: d.folderAncestorsAtDelete ?? [],
+    };
+  },
+};
+
+export const userConverter: FirestoreDataConverter<User> = {
+  // `uid` is the doc-ID — Auth UID. Stripped on write so we don't ship a
+  // redundant field; injected from `snap.id` on read.
+  toFirestore(user: WithFieldValue<User>): DocumentData {
+    const { uid: _strip, ...payload } = user as User;
+    return payload;
+  },
+  fromFirestore(snap: QueryDocumentSnapshot, options?: SnapshotOptions): User {
+    const d = snap.data({ ...options, serverTimestamps: 'estimate' });
+    return {
+      uid: snap.id,
+      email: d.email,
+      displayName: d.displayName,
+      isActive: d.isActive,
+      createdAt: d.createdAt,
+      updatedAt: d.updatedAt,
+      createdBy: d.createdBy,
+      updatedBy: d.updatedBy,
     };
   },
 };

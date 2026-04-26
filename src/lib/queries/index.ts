@@ -11,3 +11,13 @@ export {
   type AdjustStockParams,
   type MovementsPage,
 } from './movements';
+export {
+  listActiveStaff,
+  listInactiveStaff,
+  getUserByUid,
+  createStaffUser,
+  renameStaffUser,
+  deactivateStaffUser,
+  reactivateStaffUser,
+  type CreateStaffUserParams,
+} from './users';
