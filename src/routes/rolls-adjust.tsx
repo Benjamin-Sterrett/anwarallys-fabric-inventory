@@ -269,6 +269,17 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const onConfirm = useCallback(async () => {
     if (!item || !authUser || !userDoc || targetNewMeters === null || reason === null) return;
     setSubmitting(true); setSubmitError(null);
+    // Re-fetch userDoc fresh (R6 P2): admin may have renamed this staff via
+    // /staff while this tab stayed open. Security Rules require actorName ===
+    // /users/{uid}.displayName; a stale cached value would silently fail with
+    // permission-denied. Single-doc read is cheap; failed write is worse.
+    const freshUser = await getUserByUid(authUser.uid);
+    if (!freshUser.ok || !freshUser.data) {
+      setSubmitting(false);
+      setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
+      return;
+    }
+    setUserDoc(freshUser.data);
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -278,7 +289,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       reason,
       note: reason === 'other' ? noteTrimmed : null,
       actorUid: authUser.uid,
-      actorName: userDoc.displayName,
+      actorName: freshUser.data.displayName,
     };
     let timer: number | null = null;
     const timeoutPromise = new Promise<{ ok: false; error: { code: string; message: string } }>((resolve) => {
@@ -290,10 +301,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (!r.ok) {
       // Timeout: do NOT infer success (R3 P2). Use server-authoritative read
       // (R5 P1) so a stale cache doesn't push the operator into double-applying
-      // an adjustment that already landed.
+      // an adjustment that already landed. R6 P1 / PRJ-883: getDocFromServer
+      // is authoritative-as-of-read-time, but a still-in-flight transaction
+      // can land AFTER this read. The "refresh the page" cue is a partial
+      // mitigation; the durable fix requires a clientCorrelationId on
+      // Movement (schema change — tracked in PRJ-883).
       if (r.error.code === 'timeout') {
         setMetersInput('');
-        setSubmitError('Save took too long. The change may or may not have gone through. Check the on-hand value, then re-enter only if needed.');
+        setSubmitError('Save took too long. The change may or may not have gone through. Refresh the page to see the latest stock value before adjusting again.');
         void reloadItemFromServer();
         return;
       }
@@ -317,10 +332,18 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const onUndo = useCallback(async () => {
     if (!lastMovement || !authUser || !userDoc || !item) return;
+    setSubmitting(true);
+    // Re-fetch userDoc fresh (R6 P2 — same reason as onConfirm).
+    const freshUser = await getUserByUid(authUser.uid);
+    if (!freshUser.ok || !freshUser.data) {
+      setSubmitting(false);
+      setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
+      return;
+    }
+    setUserDoc(freshUser.data);
     // Boundary's optimistic concurrency guard rejects with `meters-mismatch`
     // if another adjustment ran in the gap. Undo issues a NEW reverse
     // transaction with reason `correction` — audit trail is preserved.
-    setSubmitting(true);
     const r = await createMovementAndAdjustItem({
       itemId: item.itemId,
       expectedOldMeters: item.remainingMeters,
@@ -328,7 +351,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       reason: 'correction',
       note: `Undo of ${lastMovement.movementId}`,
       actorUid: authUser.uid,
-      actorName: userDoc.displayName,
+      actorName: freshUser.data.displayName,
     });
     setSubmitting(false); setLastMovement(null);
     if (!r.ok) {
