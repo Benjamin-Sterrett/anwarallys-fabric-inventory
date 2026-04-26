@@ -191,6 +191,16 @@ function AdjustPage({ itemId }: { itemId: string }) {
     return () => window.clearTimeout(t);
   }, [lastMovement]);
 
+  // Snackbar-only auto-dismiss (lead Codex P3). The lastMovement effect
+  // covers Save success (15-sec window). After Undo clears lastMovement
+  // the "Undone." banner has no other timer, so it would stick until the
+  // next action. 4 sec for snack-only states.
+  useEffect(() => {
+    if (!snack || lastMovement) return;
+    const t = window.setTimeout(() => setSnack(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [snack, lastMovement]);
+
   const repeatRef = useRef<{ delay: number | null; interval: number | null }>({ delay: null, interval: null });
   const stopRepeat = useCallback(() => {
     if (repeatRef.current.delay !== null) { window.clearTimeout(repeatRef.current.delay); repeatRef.current.delay = null; }
@@ -265,10 +275,15 @@ function AdjustPage({ itemId }: { itemId: string }) {
       if (r.error.code === 'meters-mismatch') reloadItem();
       return;
     }
+    // Apply the boundary's authoritative newMeters in-place — no refetch on
+    // the success path. reloadItem() would briefly set item to undefined and
+    // unmount the snackbar + Undo affordance during a slow round-trip
+    // (lead Codex P2). The transaction is atomic; the SDK's local cache is
+    // already updated, so the in-memory shape matches the server post-commit.
+    setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
-    reloadItem();
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItem]);
 
   const onUndo = useCallback(async () => {
@@ -292,8 +307,9 @@ function AdjustPage({ itemId }: { itemId: string }) {
       setSubmitError(`Could not undo: ${mapErrorCode(r.error.code, r.error.message)}`);
       return;
     }
+    // Same in-place update pattern as onConfirm — avoid the unmount race.
+    setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setSnack('Undone.');
-    reloadItem();
   }, [lastMovement, authUser, userDoc, item, reloadItem]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
