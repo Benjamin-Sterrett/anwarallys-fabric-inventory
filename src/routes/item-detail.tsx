@@ -216,10 +216,24 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
   const undoEligible = useMemo<boolean>(() => {
     if (!lastMovement) return false;
     if (lastMovement.reversesMovementId !== null) return false; // suppress undo-of-undo
+    // Snapshot consistency: item and movements come from separate cache reads,
+    // so movements[0] can be newer than item.lastMovementId/remainingMeters
+    // (cross-device adjust, flaky Wi-Fi). Server rules (PRJ-890) would reject
+    // such an Undo with stale-reversal/meters-mismatch — gate the button here
+    // so we don't offer an action that can't succeed.
+    if (item === null || item === undefined) return false;
+    if (item.lastMovementId !== lastMovement.movementId) return false;
+    if (item.remainingMeters !== lastMovement.newMeters) return false;
     const ms = timestampMillis(lastMovement.at);
     if (ms === null) return false;
-    return now - ms <= UNDO_WINDOW_MS;
-  }, [lastMovement, now]);
+    // Clamp future-stamped movements (device clock behind Firestore) to age=0.
+    // Without the clamp, a negative age passes <= UNDO_WINDOW_MS and the Undo
+    // button stays visible forever. Server rule check (PRJ-890) is the real
+    // safety net; this is UX. Clock-ahead case (window closes early) is UX
+    // inconvenience only — server rejection prevents actual harm.
+    const ageMs = Math.max(0, now - ms);
+    return ageMs <= UNDO_WINDOW_MS;
+  }, [lastMovement, item, now]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
