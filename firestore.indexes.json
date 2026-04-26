@@ -42,6 +42,15 @@
         { "fieldPath": "itemId", "order": "ASCENDING" },
         { "fieldPath": "at", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "movements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientCorrelationId", "order": "ASCENDING" },
+        { "fieldPath": "itemId", "order": "ASCENDING" },
+        { "fieldPath": "actorUid", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

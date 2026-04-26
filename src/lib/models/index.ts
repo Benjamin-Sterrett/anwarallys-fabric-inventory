@@ -152,6 +152,21 @@ export interface Movement {
    * uses this for "Undone" badges via a single index lookup, not a parse.
    */
   reversesMovementId: string | null;
+  /**
+   * Client-generated UUID v4 for atomic stock-write reconciliation on save
+   * timeout (PRJ-883). When the client's 10s `Promise.race` against
+   * `createMovementAndAdjustItem` fires, the underlying transaction may
+   * still be in flight server-side. The client queries `/movements` for a
+   * doc with this id (scoped by `itemId`) to determine authoritative
+   * commit status — if found, the save succeeded and the 15-sec Undo
+   * window is restored; if not found after a brief grace period, the
+   * save genuinely failed and a clean retry is safe.
+   *
+   * The boundary defaults to `crypto.randomUUID()` when callers omit the
+   * field. Empty string on read for movements written BEFORE this field
+   * existed (forward-only — pre-existing docs are never backfilled).
+   */
+  clientCorrelationId: string;
 }
 
 /**

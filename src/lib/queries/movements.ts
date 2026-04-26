@@ -11,6 +11,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDocsFromServer,
   limit as queryLimit,
   orderBy,
   query,
@@ -24,6 +25,7 @@ import {
 import { getDb } from '@/lib/firebase/app';
 import { itemConverter, movementConverter } from '@/lib/firebase/converters';
 import type { Movement, MovementReason, RollItem } from '@/lib/models';
+import { randomUUIDv4 } from '@/lib/util/uuid';
 import { err, ok, type Result } from './result';
 
 /** `expectedOldMeters` is the concurrency guard — never re-read it. */
@@ -42,6 +44,18 @@ export interface AdjustStockParams {
    * don't undo stay rules-conformant.
    */
   reversesMovementId?: string | null;
+  /**
+   * Client-generated UUID v4 for atomic stock-write reconciliation on save
+   * timeout (PRJ-883). Callers MAY pass a pre-generated id so they can
+   * reconcile via `findMovementByCorrelationId(itemId, id)` after a
+   * client-side timeout fires while the transaction commit is still in
+   * flight. If omitted, the boundary generates a fresh UUID so writes
+   * still land with the field populated — the rollout floor is "every new
+   * movement has a correlation id" even if the caller doesn't reconcile.
+   * The resolved id is returned in the success Result so caller-omit
+   * paths can still recover state if needed.
+   */
+  clientCorrelationId?: string;
 }
 
 // Sentinels thrown inside the transaction; outer catch maps them.
@@ -68,15 +82,16 @@ function isNonEmpty(s: unknown): s is string {
  * roll), `invalid-actor` (empty UID/name breaks audit attribution),
  * `invalid-reversal` (PRJ-890 — back-reference set but malformed/wrong
  * reason), `stale-reversal` (PRJ-890 — undo target is no longer the
- * item's last movement), `firestore/no-db`, `firestore/init-failed`,
- * `item-missing`,
+ * item's last movement), `invalid-correlation-id` (PRJ-883 — caller
+ * supplied an empty/whitespace string), `firestore/no-db`,
+ * `firestore/init-failed`, `item-missing`,
  * `meters-mismatch`, `firestore/<FirestoreErrorCode>` (e.g.
  * `firestore/permission-denied`, `firestore/aborted` for tx contention),
  * `firestore/transaction-failed` (non-FirebaseError fallback).
  */
 export async function createMovementAndAdjustItem(
   params: AdjustStockParams,
-): Promise<Result<{ movementId: string; newMeters: number }>> {
+): Promise<Result<{ movementId: string; newMeters: number; clientCorrelationId: string }>> {
   if (!isValidMeters(params.newMeters)) return err('invalid-meters', 'newMeters must be a finite, non-negative number.');
   if (!isValidMeters(params.expectedOldMeters)) return err('invalid-meters', 'expectedOldMeters must be a finite, non-negative number.');
   // Zero-delta adjustments are rejected at the boundary because Security
@@ -95,6 +110,16 @@ export async function createMovementAndAdjustItem(
     if (!isNonEmpty(params.reversesMovementId)) return err('invalid-reversal', 'reversesMovementId must be a non-empty string when set.');
     if (params.reason !== 'correction') return err('invalid-reversal', "reversesMovementId requires reason 'correction'.");
   }
+  // PRJ-883: caller may pre-generate the correlation id (so they can
+  // reconcile via `findMovementByCorrelationId` after a client-side
+  // timeout). Boundary fail-fast on supplied-but-blank values; a blank
+  // id would defeat the reconcile lookup. When omitted, the boundary
+  // generates a fresh UUID — every movement leaves the boundary with
+  // the field populated.
+  if (params.clientCorrelationId !== undefined && !isNonEmpty(params.clientCorrelationId)) {
+    return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string when set.');
+  }
+  const correlationId = params.clientCorrelationId ?? randomUUIDv4();
 
   // Init phase: getDb() can throw (IndexedDB / storage quota).
   let db: Firestore;
@@ -146,6 +171,7 @@ export async function createMovementAndAdjustItem(
         actorName: params.actorName,
         at: serverTimestamp(),
         reversesMovementId: params.reversesMovementId ?? null,
+        clientCorrelationId: correlationId,
       };
 
       // `lastMovementId` is the rules-verifiable cross-reference: PRJ-805
@@ -160,7 +186,7 @@ export async function createMovementAndAdjustItem(
       });
       tx.set(movementRef, movementPayload);
 
-      return { movementId: movementRef.id, newMeters: params.newMeters };
+      return { movementId: movementRef.id, newMeters: params.newMeters, clientCorrelationId: correlationId };
     });
     return ok(result);
   } catch (e) {
@@ -224,6 +250,95 @@ export async function listMovementsForItem(
     const lastCursor: QueryDocumentSnapshot<Movement> | null =
       hasMore ? (pageDocs[pageDocs.length - 1] ?? null) : null;
     return ok({ items: pageDocs.map((d) => d.data()), hasMore, lastCursor });
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Reconciliation lookup for the timeout path (PRJ-883). Given the
+ * caller's pre-generated `clientCorrelationId`, returns the matching
+ * Movement (if it committed) or `null` (if no doc exists yet).
+ *
+ * Server-only read (R1 P1): uses `getDocsFromServer` rather than
+ * `getDocs`. Same reasoning as `getItemByIdFromServer` (PRJ-787 R5):
+ * the persistent local cache can hold a pending `/movements` write for
+ * several seconds before the server ACKs. A cache-satisfied lookup
+ * could return `found` for a write that may still fail or never reach
+ * Firestore — that would let the UI claim "Saved" for an uncommitted
+ * write. Caller MUST handle `firestore/unavailable` (offline / no
+ * server reachable) — there is no cache fallback by design.
+ *
+ * Triply-scoped for ownership + replay safety:
+ *   - `clientCorrelationId` (user-supplied UUID v4 — accidental reuse
+ *      is statistically impossible given the v4 entropy budget).
+ *   - `itemId` (narrows to the save attempt's intended target).
+ *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
+ *      by any active staff and Rules only validate `clientCorrelationId`
+ *      as a non-empty string. A devtools-savvy staff member could copy
+ *      another's correlation id; if their own write times out, the
+ *      reconcile lookup could return the copied movement → false
+ *      late-success / Undo state for a write that never happened. Rules
+ *      already enforce `actorUid == auth.uid` on movements/create, so
+ *      forging the field on WRITE is impossible — but READ access is
+ *      shared. The `actorUid` equality filter closes that read-side
+ *      leak. Caller passes the current user's uid.)
+ *
+ * Self-replay (an authenticated staff member deliberately reusing one of
+ * their OWN earlier correlation ids via devtools to coerce a false
+ * late-success on a future save) is NOT defended at this layer. The
+ * earlier R2/R3/R5 attempt to time-bound the query by `item.updatedAt`
+ * had a fundamental flaw: in a successful transaction `serverTimestamp()`
+ * resolves to the SAME `request.time` for both `movement.at` and
+ * `item.updatedAt`, so `at >= updatedAt` STILL matched the previous
+ * movement — the time-bound never closed the replay window it was
+ * supposed to close. The correct fix is write-side idempotency
+ * (rejecting reused `clientCorrelationId` values at commit time);
+ * tracked as PRJ-892. The realistic threat model for the pilot
+ * environment makes the gap acceptable until that ticket lands.
+ *
+ * Caller MUST treat a network/index error as inconclusive and fall back
+ * to "verify on-hand before retrying" — never auto-success on a query
+ * failure. Intended call sequence: timeout fires → poll this function
+ * once → wait grace period → poll once more → if still null treat as
+ * inconclusive (NOT confirmed-not-committed; the original transaction
+ * promise can still commit AFTER any number of null polls).
+ *
+ * Errors: `invalid-correlation-id`, `firestore/no-db`,
+ * `firestore/init-failed`, `firestore/<FirestoreErrorCode>` (e.g.
+ * `firestore/permission-denied`, `firestore/failed-precondition` for
+ * missing composite index, `firestore/unavailable` when offline),
+ * `firestore/unknown`.
+ */
+export async function findMovementByCorrelationId(
+  itemId: string,
+  clientCorrelationId: string,
+  actorUid: string,
+): Promise<Result<Movement | null>> {
+  if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
+  if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
+  if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
+
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
+    db = maybeDb;
+  } catch (e: unknown) {
+    return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const q = query(
+      collection(db, 'movements').withConverter(movementConverter),
+      where('clientCorrelationId', '==', clientCorrelationId),
+      where('itemId', '==', itemId),
+      where('actorUid', '==', actorUid),
+      queryLimit(1),
+    );
+    const docs = (await getDocsFromServer(q)).docs;
+    return ok(docs.length === 0 ? null : (docs[0]?.data() ?? null));
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));

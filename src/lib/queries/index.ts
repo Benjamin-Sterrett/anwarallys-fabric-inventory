@@ -18,6 +18,7 @@ export {
 export {
   createMovementAndAdjustItem,
   listMovementsForItem,
+  findMovementByCorrelationId,
   type AdjustStockParams,
   type MovementsPage,
 } from './movements';

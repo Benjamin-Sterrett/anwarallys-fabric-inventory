@@ -368,6 +368,30 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/movements/$(request.resource.data.reversesMovementId)).data.newMeters == request.resource.data.oldMeters
             && get(/databases/$(database)/documents/movements/$(request.resource.data.reversesMovementId)).data.oldMeters == request.resource.data.newMeters)
         )
+        // PRJ-883: client-generated UUID v4 for atomic stock-write
+        // reconciliation on save timeout.
+        //
+        // Backward-compat (mirrors PRJ-890 lesson): the field is OPTIONAL
+        // on the wire. Pre-PRJ-883 bundles still loaded in tabs at deploy
+        // time write movements WITHOUT the `clientCorrelationId` key;
+        // Cloudflare Pages does not force-reload open sessions, so a
+        // strict `keys().hasAll(['clientCorrelationId'])` would 403 every
+        // stock adjustment from those tabs until the user refreshed.
+        // After pilot, a follow-up ticket can tighten this predicate to
+        // require the field once all sessions have rolled over.
+        //
+        // No additional integrity check is needed beyond non-empty-string:
+        // the field is intentionally caller-supplied (its purpose is to
+        // let the client reconcile its own write), and ownership safety
+        // is already enforced by the existing `actorUid == auth.uid`
+        // invariant — a hostile reuse of someone else's correlation id
+        // can never escape the actor=self gate, and v4 collision odds
+        // are negligible.
+        && (
+          !request.resource.data.keys().hasAny(['clientCorrelationId'])
+          || request.resource.data.clientCorrelationId == null
+          || isNonEmptyString(request.resource.data.clientCorrelationId)
+        )
         // Impersonation guard: actor MUST be the caller, and actorName
         // MUST match the caller's /users/{uid}.displayName (PRJ-859) so a
         // staff member cannot forge a colleague's name into the audit

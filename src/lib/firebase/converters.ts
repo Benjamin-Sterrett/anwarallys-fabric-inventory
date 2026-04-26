@@ -94,6 +94,8 @@ export const movementConverter: FirestoreDataConverter<Movement> = {
       actorName: d.actorName,
       at: d.at,
       reversesMovementId: d.reversesMovementId ?? null,
+      // Empty string for movements written before PRJ-883 (forward-only).
+      clientCorrelationId: d.clientCorrelationId ?? '',
     };
   },
 };

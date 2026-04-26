@@ -11,8 +11,9 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { createMovementAndAdjustItem, getItemById, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
-import type { MovementReason, RollItem, User } from '@/lib/models';
+import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
+import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
+import { randomUUIDv4 } from '@/lib/util/uuid';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -22,6 +23,12 @@ const NOTE_MAX = 200;
 const NOTE_MIN_OTHER = 3;
 const SAVE_TIMEOUT_MS = 10_000;
 const UNDO_WINDOW_MS = 15_000;
+// PRJ-883: timeout reconciliation. After a `Promise.race` timeout fires,
+// the underlying transaction may still be in flight server-side. Poll
+// `/movements` for the correlation id; first probe is immediate, then
+// one retry after a grace period for in-flight commits to land.
+const RECONCILE_RETRY_DELAY_MS = 2500;
+const RECONCILE_MAX_ATTEMPTS = 2;
 
 const REASONS: ReadonlyArray<{ value: MovementReason; label: string }> = [
   { value: 'sold', label: 'Sold' }, { value: 'cut', label: 'Cut' },
@@ -61,6 +68,7 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'meters-mismatch': return 'Stock changed in another session. Refresh and retry.';
     case 'stale-reversal': return 'Another adjustment ran after this one. Refresh and retry.';
     case 'invalid-reversal': return 'Could not record this undo. Refresh and try again.';
+    case 'invalid-correlation-id': return 'Could not record this save. Refresh and try again.';
     case 'invalid-meters': return 'The meters value is not valid. Check the number and try again.';
     case 'zero-delta': return 'No change to save.';
     case 'invalid-actor': return 'You are not signed in. Sign in and try again.';
@@ -70,6 +78,57 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'timeout': return 'Save took too long. Check your internet and retry.';
     default: return `${fallback} (${code})`;
   }
+}
+
+// PRJ-883: Reconcile a timed-out save against the authoritative server
+// state. Polls `findMovementByCorrelationId` up to `RECONCILE_MAX_ATTEMPTS`
+// times, with `RECONCILE_RETRY_DELAY_MS` between probes, to absorb the
+// window where a transaction commit lands AFTER the client-side timeout
+// fires.
+//
+// Two-outcome reconcile (R1 P1.b / lead Codex round 1):
+//   - 'found'         → server returned the movement; positive proof of
+//                       commit. UI can safely show "Saved" + Undo using
+//                       the SERVER-AUTHORITATIVE values.
+//   - 'inconclusive'  → no commit observed yet (every probe returned
+//                       null cleanly) OR a probe errored. We do NOT
+//                       collapse all-null to "not-committed": absence of
+//                       evidence is not evidence of absence. The
+//                       original `createMovementAndAdjustItem` promise
+//                       can still be in flight and commit AFTER the
+//                       second null poll on a slow / retried connection.
+//                       Declaring 'not-committed' from absence would
+//                       create a real double-apply window — operator
+//                       retries, original write lands later, item state
+//                       corrupted. UI shows the conservative "may or
+//                       may not have gone through — verify on-hand,
+//                       then re-enter only if needed" message and
+//                       withholds Undo. Confirmed-not-committed (with
+//                       safe-to-retry semantics) requires write-side
+//                       idempotency; deferred to a follow-up ticket.
+async function reconcileTimedOutSave(
+  itemId: string,
+  clientCorrelationId: string,
+  actorUid: string,
+): Promise<{ kind: 'found'; movement: Movement } | { kind: 'inconclusive' }> {
+  for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
+    }
+    // Lookup is scoped by (clientCorrelationId, itemId, actorUid). The
+    // earlier `at >= item.updatedAt` time-bound (R2/R3/R5) was removed in
+    // R6: in a successful tx `serverTimestamp()` resolves to the SAME
+    // `request.time` for both `movement.at` and `item.updatedAt`, so
+    // `at >= updatedAt` matched the previous movement and never closed
+    // the replay window. Self-replay defense moves to write-side
+    // idempotency (PRJ-892); v4 UUID + actor scoping cover the rest.
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
+    if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
+    // r.ok && r.data === null  → not yet observed; keep polling.
+    // !r.ok                    → probe errored; keep polling.
+    // Either way, fall through to the next attempt.
+  }
+  return { kind: 'inconclusive' };
 }
 
 function useOnline(): boolean {
@@ -152,10 +211,23 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Mount-time server-authoritative read (R7 P1, PRJ-883 / PRJ-893): the
+  // "Reload page" affordance is the only recovery path after an inconclusive
+  // timeout, so cache-backed mount could rehydrate pre-commit `remainingMeters`
+  // and defeat the safety net. Forcing a server roundtrip guarantees the
+  // operator sees state after any in-flight tx settles. Trade-off: this route
+  // is no longer offline-friendly on initial mount (writes are blocked offline
+  // anyway per pilot policy). Browse routes still use cache-backed reads.
   const reloadItem = useCallback(() => {
     setItem(undefined); setLoadError(null);
-    void getItemById(itemId).then((r) => {
-      if (!r.ok) { setItem(null); setLoadError(`Could not load item: ${r.error.message} (${r.error.code})`); return; }
+    void getItemByIdFromServer(itemId).then((r) => {
+      if (!r.ok) {
+        setItem(null);
+        const offline = r.error.code === 'firestore/unavailable';
+        const hint = offline ? ' You appear to be offline; reconnect and reload.' : '';
+        setLoadError(`Could not load this item: ${r.error.message} (${r.error.code}).${hint}`);
+        return;
+      }
       if (!r.data) { setItem(null); setLoadError('That item is missing or has been deleted.'); return; }
       setItem(r.data);
     });
@@ -201,6 +273,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
   const [lastMovement, setLastMovement] = useState<{ movementId: string; oldMeters: number; newMeters: number } | null>(null);
+  // R2 P1 / lead Codex round 2: when the timeout-reconcile probe is
+  // inconclusive, the on-screen on-hand cannot be trusted (the original
+  // transaction can still commit AFTER our last poll, so a fresh
+  // server read can return PRE-commit meters). The only safe posture is
+  // to disable the form and force the operator to manually reload —
+  // page reload guarantees a fresh snapshot after the SDK has had time
+  // to settle the in-flight transaction. There is no auto-recovery.
+  const [inconclusivePending, setInconclusivePending] = useState(false);
 
   useEffect(() => {
     if (!lastMovement) return;
@@ -245,7 +325,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     && targetNewMeters !== item.remainingMeters;
   const noteTrimmed = note.trim();
   const noteValid = reason !== 'other' || (noteTrimmed.length >= NOTE_MIN_OTHER && noteTrimmed.length <= NOTE_MAX);
-  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc;
+  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc && !inconclusivePending;
 
   const stepBy = useCallback((amount: number) => {
     setMetersInput((cur) => {
@@ -282,6 +362,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
       return;
     }
     setUserDoc(freshUser.data);
+    // PRJ-883: pre-generate the correlation id so we can reconcile if
+    // the client-side timeout fires before the boundary's success
+    // result lands. Fresh per attempt — never replayed across saves.
+    const correlationId = randomUUIDv4();
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -292,6 +376,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       note: reason === 'other' ? noteTrimmed : null,
       actorUid: authUser.uid,
       actorName: freshUser.data.displayName,
+      clientCorrelationId: correlationId,
     };
     let timer: number | null = null;
     const timeoutPromise = new Promise<{ ok: false; error: { code: string; message: string } }>((resolve) => {
@@ -299,19 +384,63 @@ function AdjustPage({ itemId }: { itemId: string }) {
     });
     const r = await Promise.race([createMovementAndAdjustItem(params), timeoutPromise]);
     if (timer !== null) window.clearTimeout(timer);
-    setSubmitting(false); setConfirmOpen(false);
+    // Lead Codex R4 P1: keep `submitting` true through reconcile. Closing the
+    // confirm modal early is fine (it's just chrome); but flipping submitting
+    // to false here re-enabled Save/Undo during the 0–2.5s timeout reconcile
+    // poll, defeating this PR's double-apply protection. Defer to terminal
+    // branches: success, non-timeout error, found, inconclusive.
+    setConfirmOpen(false);
     if (!r.ok) {
-      // Timeout: do NOT infer success (R3 P2). Use server-authoritative read
-      // (R5 P1) so a stale cache doesn't push the operator into double-applying
-      // an adjustment that already landed. R6 P1 / PRJ-883: getDocFromServer
-      // is authoritative-as-of-read-time, but a still-in-flight transaction
-      // can land AFTER this read. The "refresh the page" cue is a partial
-      // mitigation; the durable fix requires a clientCorrelationId on
-      // Movement (schema change — tracked in PRJ-883).
+      // PRJ-883: timeout reconciliation. The client-side `Promise.race`
+      // timeout fires before the server has acknowledged commit, but the
+      // transaction may still be in flight. Query `/movements` for the
+      // correlation id we wrote into `params.clientCorrelationId`:
+      // - found: authoritative proof of commit — restore snackbar + Undo
+      //   using the server-authoritative movement values.
+      // - inconclusive: NO positive proof of commit (all probes null
+      //   and/or errored). Show conservative "may or may not have gone
+      //   through" message and withhold Undo. We do NOT claim the write
+      //   failed — the original transaction can still commit after any
+      //   number of null polls, and a "safe to retry" claim would create
+      //   a real double-apply window. Confirmed-not-committed semantics
+      //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        setMetersInput('');
-        setSubmitError('Save took too long. The change may or may not have gone through. Refresh the page to see the latest stock value before adjusting again.');
-        void reloadItemFromServer();
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
+        if (outcome.kind === 'found') {
+          // Late-success path — restore the 15-sec Undo window. Use the
+          // server-authoritative movement values (oldMeters/newMeters/
+          // movementId), NOT the client request, so a query hit can
+          // never mislead the Undo math.
+          //
+          // R6: no post-success `reloadItemFromServer()` here. The
+          // earlier R5 refresh existed to refresh `item.updatedAt` for
+          // the next save's reconcile time-bound — the time-bound itself
+          // is gone (R6 design simplification), so the refresh is
+          // unnecessary. It was also masking the snackbar/Undo
+          // affordance during the refetch (reloadItemFromServer sets
+          // item to undefined), which could swallow the 15-sec Undo
+          // window on slow networks.
+          const m = outcome.movement;
+          setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
+          setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
+          setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
+          setMetersInput(''); setReason(null); setNote('');
+          setSubmitting(false);
+          return;
+        }
+        // outcome.kind === 'inconclusive' — could still be in flight
+        // server-side (R2 P1 / lead Codex round 2: the original
+        // transaction can still commit AFTER our last poll, so even a
+        // fresh server-read of the item could return PRE-commit meters
+        // — operator would re-enter from a stale on-hand and double-
+        // apply once the original lands). The only safe posture is to
+        // disable the form entirely and force the operator to reload
+        // the page manually. Page reload guarantees a fresh snapshot
+        // after the SDK has had time to settle the in-flight tx. NO
+        // auto-recovery, NO Undo affordance, NO "safe to retry" claim.
+        setInconclusivePending(true);
+        setSubmitError('Save took too long. The change may or may not have gone through. Reload this page to see the actual on-hand value before making any further changes.');
+        setSubmitting(false);
         return;
       }
       // Concurrent edit (R3 P1) — same server-read for the same reason (R5 P1).
@@ -319,17 +448,25 @@ function AdjustPage({ itemId }: { itemId: string }) {
         setMetersInput('');
         setSubmitError('Stock changed in another session. Check the new on-hand and re-enter your adjustment.');
         void reloadItemFromServer();
+        setSubmitting(false);
         return;
       }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
+      setSubmitting(false);
       return;
     }
     // In-place setItem from authoritative boundary return — no refetch on
     // success path (lead Codex P2: refetch unmounted Undo affordance).
+    // R6: no post-success `reloadItemFromServer()`. The earlier R5 call
+    // existed only to refresh `item.updatedAt` for the next save's
+    // reconcile time-bound; the time-bound is gone after R6, so the
+    // refresh is unnecessary — and it was hiding the snackbar/Undo
+    // during refetch.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
+    setSubmitting(false);
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
 
   const onUndo = useCallback(async () => {
@@ -366,6 +503,9 @@ function AdjustPage({ itemId }: { itemId: string }) {
       return;
     }
     // Same in-place update pattern as onConfirm — avoid the unmount race.
+    // R6: no post-undo `reloadItemFromServer()` (R6 design simplification —
+    // see onConfirm comments). The boundary returns server-authoritative
+    // values; nothing else needs refreshing.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setSnack('Undone.');
   }, [lastMovement, authUser, userDoc, item]);
@@ -431,8 +571,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
       <div className="mb-4 inline-flex rounded-md border border-gray-300 bg-white" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'sold'} onClick={() => onTab('sold')}
+          disabled={inconclusivePending}
           className={`${BTN_BASE} ${tab === 'sold' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Sold / used</button>
         <button type="button" role="tab" aria-selected={tab === 'exact'} onClick={() => onTab('exact')}
+          disabled={inconclusivePending}
           className={`${BTN_BASE} ${tab === 'exact' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Set to exact</button>
       </div>
 
@@ -445,13 +587,16 @@ function AdjustPage({ itemId }: { itemId: string }) {
             <button type="button" aria-label="Decrease"
               onPointerDown={() => startStep(-STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
+              disabled={inconclusivePending}
               className={`${BTN_SECONDARY} px-4`}>−</button>
             <input type="text" inputMode="decimal" autoComplete="off"
               value={metersInput} onChange={(e) => setMetersInput(e.target.value)}
-              placeholder="0" className={`${INPUT} flex-1 text-center text-lg`} />
+              disabled={inconclusivePending}
+              placeholder="0" className={`${INPUT} flex-1 text-center text-lg disabled:bg-gray-100 disabled:opacity-50`} />
             <button type="button" aria-label="Increase"
               onPointerDown={() => startStep(STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
+              disabled={inconclusivePending}
               className={`${BTN_SECONDARY} px-4`}>+</button>
           </div>
         </label>
@@ -471,6 +616,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
             const selected = reason === r.value;
             return (
               <button key={r.value} type="button" onClick={() => setReason(r.value)} aria-pressed={selected}
+                disabled={inconclusivePending}
                 className={`${BTN_BASE} ${selected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-800'} px-4 py-2`}>
                 {r.label}
               </button>
@@ -483,7 +629,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
         <label className="mb-4 block">
           <span className="text-sm font-medium text-gray-800">Note (required)</span>
           <textarea value={note} onChange={(e) => setNote(e.target.value.slice(0, NOTE_MAX))}
-            rows={2} maxLength={NOTE_MAX} placeholder="What happened?" className={INPUT} />
+            disabled={inconclusivePending}
+            rows={2} maxLength={NOTE_MAX} placeholder="What happened?" className={`${INPUT} disabled:bg-gray-100 disabled:opacity-50`} />
           <span className="mt-1 block text-xs text-gray-600">
             {noteTrimmed.length}/{NOTE_MAX} — at least {NOTE_MIN_OTHER} characters.
           </span>
@@ -493,7 +640,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
       {submitError ? <p className="mb-3 text-sm text-red-700" role="alert">{submitError}</p> : null}
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
+        {inconclusivePending ? (
+          // R2 P1 / lead Codex round 2: only safe action is a hard
+          // page reload — guarantees a fresh server snapshot of
+          // remainingMeters after any in-flight tx has settled.
+          <button type="button" onClick={() => window.location.reload()} className={BTN_PRIMARY}>Reload page</button>
+        ) : (
+          <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
+        )}
         <button type="button" onClick={() => navigate(-1)} className={BTN_SECONDARY}>Cancel</button>
       </div>
 
