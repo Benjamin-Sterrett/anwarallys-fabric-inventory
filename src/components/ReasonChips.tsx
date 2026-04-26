@@ -1,7 +1,7 @@
 // Reason chip selector — extracted from rolls-adjust.tsx (PRJ-788).
 // Reusable across any surface that needs a MovementReason selection.
 
-import { useCallback } from 'react';
+import { useCallback, type ChangeEvent } from 'react';
 import type { MovementReason } from '@/lib/models';
 
 export const REASONS: ReadonlyArray<{ value: MovementReason; label: string }> = [
@@ -49,7 +49,7 @@ export default function ReasonChips({
   noteMinLength = 3,
 }: ReasonChipsProps) {
   const handleNoteChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    (e: ChangeEvent<HTMLTextAreaElement>) => {
       onNoteChange?.(e.target.value.slice(0, noteMaxLength));
     },
     [onNoteChange, noteMaxLength]
