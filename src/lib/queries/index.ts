@@ -3,7 +3,14 @@
 // `runTransaction`, etc.) directly. See README "Data access boundary".
 
 export { err, ok, type Result } from './result';
-export { listFolderChildren, countActiveItemsInSubtree } from './folders';
+export {
+  listFolderChildren,
+  subscribeToFolderChildren,
+  getFolderById,
+  createFolder,
+  countActiveItemsInSubtree,
+  type CreateFolderParams,
+} from './folders';
 export { getItemById, type GetItemByIdOptions } from './items';
 export {
   createMovementAndAdjustItem,
