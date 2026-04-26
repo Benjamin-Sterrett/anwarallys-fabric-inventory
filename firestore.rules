@@ -28,10 +28,17 @@ service cloud.firestore {
     // Admin gate. Does NOT require `isActiveStaff()` so admins can
     // self-provision before any /users docs exist. `email_verified` is
     // required because Firebase Auth's email field is otherwise mutable.
+    //
+    // PRJ-873: both sides are lower-cased before comparison. Firebase Auth
+    // normalizes `request.auth.token.email` server-side, but a Console-
+    // seeded `/config/admin.adminEmail` can be any case — without parity
+    // the gate silently fails for the admin (the client `isAdminEmail()`
+    // helper lowercases too, so /staff loads but every Firestore write
+    // 403s — fake-success). Casing of the seed is now irrelevant.
     function isAdminUser() {
       return isAuthed()
         && request.auth.token.email_verified == true
-        && request.auth.token.email == adminEmail();
+        && request.auth.token.email.lower() == adminEmail().lower();
     }
 
     // Finite non-negative. NaN >= 0 is false, so NaN is filtered.
@@ -420,7 +427,18 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.updatedBy == request.auth.uid;
 
+      // PRJ-874: admin lockout prevention. Reject any admin update that
+      // sets `isActive: false` on the admin's own /users doc, and reject
+      // any admin-initiated delete of their own doc. Without this, an
+      // admin who taps "Turn off" on themselves (or a hostile client
+      // bypassing the staff.tsx self-filter from PRJ-871) flips
+      // `isActive` to false and immediately loses inventory access via
+      // `isActiveStaff()`. Recovery would require Firebase Console
+      // intervention. The Console remains a Rules-bypass (Console writes
+      // are unaffected by these rules), but this closes the in-app and
+      // hostile-client paths.
       allow update: if isAdminUser()
+        && !(request.auth.uid == uid && request.resource.data.isActive == false)
         && unchanged('email')
         && unchanged('createdAt')
         && unchanged('createdBy')
@@ -429,7 +447,8 @@ service cloud.firestore {
         && isNonEmptyString(request.resource.data.displayName)
         && request.resource.data.isActive is bool;
 
-      allow delete: if isAdminUser();
+      // PRJ-874: admin cannot delete their own /users doc.
+      allow delete: if isAdminUser() && request.auth.uid != uid;
     }
 
     // /config — admin-email lookup target. PRJ-866: blocked entirely from

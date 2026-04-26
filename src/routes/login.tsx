@@ -26,6 +26,11 @@ function sanitizeContinue(raw: string | null): string {
   // and anything else (http://, javascript:, etc.).
   if (!raw.startsWith('/')) return '/';
   if (raw.startsWith('//')) return '/';
+  // PRJ-877: reject `/login` itself (case-insensitive) followed by
+  // `?`, `/`, `#`, or end-of-string. Otherwise an authenticated user
+  // hitting `/login?continue=/login` would redirect-loop into the
+  // already-signed-in short-circuit and sit on the loading shell forever.
+  if (/^\/login(?:[?/#]|$)/i.test(raw)) return '/';
   return raw;
 }
 
