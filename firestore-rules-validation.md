@@ -45,7 +45,7 @@ Run scenarios via the Emulator UI Rules Playground or `@firebase/rules-unit-test
 | 8 | Update or delete an existing `/movements/{id}` | Rejected (append-only) | _pending_ |
 | 10 | Active staff (NOT admin) creates `/users/{some-uid}` | Rejected (admin gate) | _pending_ |
 | 11 | Admin user (email matches `/config/admin.adminEmail`) creates `/users/{some-uid}` with valid shape | Allowed | _pending_ |
-| 12 | Active staff reads + cannot write `/config/admin` | Allowed read; rejected write (Console-only) | _pending_ |
+| 12 | Active staff reads + writes `/config/admin` | Both rejected — PRJ-866 locks `/config` to deny-all clients (read AND write). `isAdminUser()` continues to work because Rules-internal `get()` bypasses client read. Console writes are Rules-bypass and remain the only mutation path. | _pending_ |
 | 14 | Active staff (uid=A) creates `/items/{id}` with `createdBy: 'B'` | Rejected (createdBy spoof guard) | _pending_ |
 | 15 | Active staff attempts to hard-delete `/items/{id}` | Rejected (soft-delete only) | _pending_ |
 | 16 | Deactivated user (`isActive: false`) OR user with no `/users/{uid}` doc reads or writes `/items` | Rejected (`isActiveStaff()` fails) | _pending_ |
@@ -71,6 +71,13 @@ Run scenarios via the Emulator UI Rules Playground or `@firebase/rules-unit-test
 | 34 | Items restore where the parent folder was Console-soft-deleted DURING the 7d window | Rejected (folder existence + active check on restore branch) | _pending_ |
 | 35 | Items restore where the parent folder was Console-HARD-deleted DURING the 7d window | Rejected (`exists(folder)` fails) | _pending_ |
 | 36 | Items.update (rename, folder-move, anything) on an active item under a Console-soft-deleted folder | Rejected (existing `folder.deletedAt == null` check on items.update) | _pending_ |
+| 37 | Active staff creates `/items/{id}` with the `deletedAt` field omitted entirely (also for `deletedBy`, `deleteReason`) (PRJ-865) | Rejected (`request.resource.data.keys().hasAll(['deletedAt','deletedBy','deleteReason'])` blocks omitted-field ghost rows) | _pending_ |
+| 38 | Active staff creates `/items/{id}` with explicit `deletedAt: null`, `deletedBy: null`, `deleteReason: null`, all other fields valid (PRJ-865 backward-compat) | Allowed (the legitimate happy path is preserved — data-boundary helpers always set the fields explicitly) | _pending_ |
+| 39 | Active staff (admin OR non-admin) calls `getDoc(doc(db,'config','admin'))` from client (PRJ-866) | Rejected for both — `/config` is locked down. `isAdminUser()` continues to work because Rules-internal `get()` bypasses client read access. | _pending_ |
+| 40 | Active staff creates `/folders/{id}` with the `deletedAt` field omitted entirely (also for `deletedBy`) (PRJ-865) | Rejected (`request.resource.data.keys().hasAll(['deletedAt','deletedBy'])` blocks omitted-field ghost folders) | _pending_ |
+| 41 | Active staff creates `/folders/{id}` with explicit `deletedAt: null`, `deletedBy: null`, all other fields valid (PRJ-865 backward-compat) | Allowed (legitimate happy path preserved) | _pending_ |
+| 42 | Active staff updates `/folders/{id}` via full-document `setDoc()` overwrite (or `updateDoc` with `deleteField()`) that drops `deletedAt`/`deletedBy` from the post-write doc (PRJ-865 update guard) | Rejected (`hasAll` on `request.resource.data` enforces post-write doc shape; partial `updateDoc()` calls without those fields still pass because Firestore merges the existing values into `request.resource.data`) | _pending_ |
+| 43 | Active staff updates `/items/{id}` (rename, no delete-state change) via full-document `setDoc()` overwrite (or `updateDoc` with `deleteField()`) that drops `deletedAt`/`deletedBy`/`deleteReason` from the post-write doc (PRJ-865 update guard, Transition 1) | Rejected (`hasAll` enforces post-write doc shape; partial `updateDoc()` without those fields still passes via merge — this guard is for the `setDoc()`/`deleteField()` edge) | _pending_ |
 
 ## Atomic stock-write enforcement
 
@@ -94,6 +101,7 @@ attributable audit row.
 ## Known v1 limitations (deferred)
 
 - **Re-delete within 7d:** restoring then re-deleting fails because the prior tombstone still exists. Wait for TTL or Console-clear. Follow-up filed.
+- **PRJ-865 + PRJ-866 — CLOSED.** Defense-in-depth tightenings shipped: items + folders create/update now enforce field-presence via `request.resource.data.keys().hasAll([...])` (no more omitted-deletedAt ghost rows), and `/config/{document}` is fully locked down from clients (`allow read, write: if false;` — `isAdminUser()` continues to work via Rules-internal `get()`).
 - **Folder soft-delete blocked entirely in v1 (PRJ-863, supersedes PRJ-860):** Firestore Security Rules cannot iterate `folderAncestors[]` (no list-iteration primitive in Rules expressions), so we cannot reject item writes inside descendants of a soft-deleted ancestor. Items.update only checks the DIRECT parent folder, leaving grandchildren and below freely writable — a real authz gap, not a contained one. Rather than ship rules that look stronger than they are, v1 disables in-app folder soft-delete entirely: `unchanged('deletedAt')` and `unchanged('deletedBy')` on every folder update, plus `resource.data.deletedAt == null` so already-deleted folders are fully immutable. Folders are rename-only. **Do NOT use the Firebase Console to soft-delete or hard-delete non-leaf folders** — that recreates the orphan-descendant state Rules can't contain. Only safe manual cleanup is hard-deleting an empty leaf folder. The proper subtree-aware delete flow lands in PRJ-796 (Wave 5).
 
 ## Sign-off

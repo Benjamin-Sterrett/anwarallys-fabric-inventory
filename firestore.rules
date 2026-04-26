@@ -90,6 +90,11 @@ service cloud.firestore {
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.updatedBy == request.auth.uid
+        // PRJ-865: require explicit field presence. In Firestore Rules an
+        // omitted field reads as `null`, so `field == null` alone passes
+        // for docs created without the key. Such docs are then invisible
+        // to `where('deletedAt','==',null)` queries (silent ghost rows).
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy'])
         && request.resource.data.deletedAt == null
         && request.resource.data.deletedBy == null
         && (
@@ -133,6 +138,11 @@ service cloud.firestore {
         && unchanged('depth')
         && unchanged('deletedAt')
         && unchanged('deletedBy')
+        // PRJ-865: enforce post-update doc shape. Without this, an update
+        // could omit `deletedAt`/`deletedBy` and the fields would vanish
+        // from the doc, dropping it out of `where('deletedAt','==',null)`
+        // active-folder queries.
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy'])
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.updatedBy == request.auth.uid
         && isNonEmptyString(request.resource.data.name);
@@ -174,6 +184,11 @@ service cloud.firestore {
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.updatedBy == request.auth.uid
+        // PRJ-865: require explicit field presence. In Firestore Rules an
+        // omitted field reads as `null`, so `field == null` alone passes
+        // for docs created without the key. Such docs are then invisible
+        // to `where('deletedAt','==',null)` queries (silent ghost rows).
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy', 'deleteReason'])
         && request.resource.data.deletedAt == null
         && request.resource.data.deletedBy == null
         && request.resource.data.deleteReason == null;
@@ -201,6 +216,14 @@ service cloud.firestore {
         && isStringOrNull(request.resource.data.photoUrl)
         && isStringOrNull(request.resource.data.supplier)
         && isNumberOrNull(request.resource.data.price)
+        // PRJ-865: enforce post-update doc shape. The shape checks below
+        // (`isTimestampOrNull`/`isStringOrNull`) accept omitted fields
+        // (omitted == null), which would let an update drop the fields
+        // from the doc on Transition 1 (no delete-state change). The
+        // resulting doc would then escape `where('deletedAt','==',null)`
+        // active queries. Transitions 2+3 below assert exact values so
+        // omission can't bypass those branches; this guards Transition 1.
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy', 'deleteReason'])
         && isTimestampOrNull(request.resource.data.deletedAt)
         && isStringOrNull(request.resource.data.deletedBy)
         && isStringOrNull(request.resource.data.deleteReason)
@@ -409,11 +432,16 @@ service cloud.firestore {
       allow delete: if isAdminUser();
     }
 
-    // /config — admin-email lookup target. Read-only from clients;
-    // /config/admin seeded once via Firebase Console.
+    // /config — admin-email lookup target. PRJ-866: blocked entirely from
+    // clients. The `isAdminUser()` helper above reads `/config/admin` via
+    // Rules-internal `get()`, which has privileged read regardless of this
+    // rule, so client read access is unnecessary. Locking it down avoids
+    // exposing `adminEmail` to every signed-in staff member. Future code
+    // that needs admin email client-side must use a Cloud Function or
+    // session claims, not direct Firestore read. /config/admin is seeded
+    // once via Firebase Console (Console writes bypass Rules entirely).
     match /config/{document} {
-      allow read: if isAuthed();
-      allow create, update, delete: if false;
+      allow read, write: if false;
     }
 
     // Catch-all: explicit deny-by-default.
