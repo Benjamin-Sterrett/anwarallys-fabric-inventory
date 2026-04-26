@@ -1,10 +1,8 @@
 // Stock adjustment route (PRJ-787) — only consumer of
-// `createMovementAndAdjustItem`. Boundary owns invariants (actor non-empty,
-// meters finite/non-neg, zero-delta rejection, optimistic concurrency, error
-// sentinels). UI translates user intent → params and Result → UI states.
-// Modal/snackbar/chips inlined; PRJ-791 extracts modal, PRJ-788 polishes chips.
-// `actorName` MUST come from /users/{uid}.displayName — Auth profile is stale
-// (PRJ-876). Out of scope: movement history (PRJ-789), QR deep-link (PRJ-792).
+// `createMovementAndAdjustItem`. Boundary owns invariants; UI translates
+// intent → params and Result → UI states. Modal/snackbar/chips inlined
+// (PRJ-791 extracts modal, PRJ-788 polishes chips). `actorName` MUST come
+// from /users/{uid}.displayName — Auth profile is stale (PRJ-876).
 
 import {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -39,14 +37,20 @@ const INPUT = 'mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3
 
 type Tab = 'sold' | 'exact';
 
-// Strict allowlist: accepts `.` or `,` decimal; rejects sign, exponent, NaN,
-// whitespace, multi-decimal. ESL `9,5` parses; `-3` and `9..5` rejected.
+// Strict allowlist; ESL `9,5` parses, `-3` `9..5` `1.234` rejected. Rounded
+// to 2dp at parse so display === persisted value (lead Codex R2 P1).
 function parseDecimalLocale(raw: string): number | null {
   const s = raw.trim();
-  if (s === '' || !/^[0-9]+([.,][0-9]+)?$/.test(s)) return null;
+  if (s === '' || !/^[0-9]+([.,][0-9]{1,2})?$/.test(s)) return null;
   const n = Number(s.replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
 }
+
+// Half a displayed hundredth — guards against float-drifted stored values
+// (e.g. `0.19999...` vs re-typed `0.2`) producing phantom no-op writes.
+const METERS_EPSILON = 0.005;
+const meterEquals = (a: number, b: number): boolean => Math.abs(a - b) < METERS_EPSILON;
 
 function formatMeters(n: number): string {
   if (!Number.isFinite(n)) return '–';
@@ -79,9 +83,8 @@ function useOnline(): boolean {
   return online;
 }
 
-// Press for HOLD_MS to fire `onConfirm`. Release early cancels — no fire.
-// Disabled state suppresses interactions. The 800ms commitment is the second
-// guard against accidental double-saves; first is `submitting` flag on Save.
+// Press for HOLD_MS to fire `onConfirm`. Release early cancels. Second
+// guard against double-saves; first is `submitting` flag on Save.
 function HoldToConfirm({ label, onConfirm, disabled }: { label: string; onConfirm: () => void; disabled?: boolean }) {
   const [progress, setProgress] = useState(0);
   const startRef = useRef<number | null>(null);
@@ -161,8 +164,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
   }, [itemId]);
   useEffect(() => { if (authUser !== undefined) reloadItem(); }, [authUser, reloadItem]);
 
-  // Security Rules require actorName == /users/{uid}.displayName; Auth
-  // profile displayName is stale (PRJ-876), so fetch the Firestore doc.
+  // /users/{uid}.displayName fetch — see file header re: PRJ-876.
   const [userDoc, setUserDoc] = useState<User | null | undefined>(undefined);
   const [userError, setUserError] = useState<string | null>(null);
   useEffect(() => {
@@ -191,10 +193,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
     return () => window.clearTimeout(t);
   }, [lastMovement]);
 
-  // Snackbar-only auto-dismiss (lead Codex P3). The lastMovement effect
-  // covers Save success (15-sec window). After Undo clears lastMovement
-  // the "Undone." banner has no other timer, so it would stick until the
-  // next action. 4 sec for snack-only states.
+  // Snack-only auto-dismiss (lead Codex P3). lastMovement effect covers
+  // Save success; after Undo clears lastMovement, "Undone." needs its own.
   useEffect(() => {
     if (!snack || lastMovement) return;
     const t = window.setTimeout(() => setSnack(null), 4000);
@@ -225,7 +225,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
     [targetNewMeters, item],
   );
 
-  const previewValid = targetNewMeters !== null && targetNewMeters >= 0 && delta !== 0;
+  const previewValid = targetNewMeters !== null && !!item && targetNewMeters >= 0
+    && !meterEquals(targetNewMeters, item.remainingMeters);
   const noteTrimmed = note.trim();
   const noteValid = reason !== 'other' || (noteTrimmed.length >= NOTE_MIN_OTHER && noteTrimmed.length <= NOTE_MAX);
   const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc;
@@ -254,6 +255,9 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const onConfirm = useCallback(async () => {
     if (!item || !authUser || !userDoc || targetNewMeters === null || reason === null) return;
     setSubmitting(true); setSubmitError(null);
+    // Asymmetry intentional (lead Codex R2 P1.d): expectedOldMeters must be
+    // raw (boundary strict-equals it; rounding → `meters-mismatch`).
+    // newMeters is the rounded display value (parseDecimalLocale rounds).
     const params = {
       itemId: item.itemId,
       expectedOldMeters: item.remainingMeters,
@@ -267,19 +271,37 @@ function AdjustPage({ itemId }: { itemId: string }) {
     const timeoutPromise = new Promise<{ ok: false; error: { code: string; message: string } }>((resolve) => {
       timer = window.setTimeout(() => resolve({ ok: false, error: { code: 'timeout', message: 'Save timed out.' } }), SAVE_TIMEOUT_MS);
     });
+    const oldMetersAtSubmit = item.remainingMeters;
+    const oldMovementIdAtSubmit = item.lastMovementId;
     const r = await Promise.race([createMovementAndAdjustItem(params), timeoutPromise]);
     if (timer !== null) window.clearTimeout(timer);
     setSubmitting(false); setConfirmOpen(false);
     if (!r.ok) {
+      // Timeout reconciliation (lead Codex R2 P2): the in-flight tx may
+      // commit after the race. One re-fetch; if lastMovementId advanced AND
+      // remainingMeters matches what we sent, treat as late success.
+      if (r.error.code === 'timeout') {
+        const fresh = await getItemById(item.itemId);
+        if (fresh.ok && fresh.data && fresh.data.lastMovementId !== null
+            && fresh.data.lastMovementId !== oldMovementIdAtSubmit
+            && meterEquals(fresh.data.remainingMeters, targetNewMeters)) {
+          setItem(fresh.data);
+          setLastMovement({
+            movementId: fresh.data.lastMovementId,
+            oldMeters: oldMetersAtSubmit,
+            newMeters: fresh.data.remainingMeters,
+          });
+          setSnack(`Saved: ${formatMeters(oldMetersAtSubmit)} → ${formatMeters(fresh.data.remainingMeters)}`);
+          setMetersInput(''); setReason(null); setNote('');
+          return;
+        }
+      }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
       if (r.error.code === 'meters-mismatch') reloadItem();
       return;
     }
-    // Apply the boundary's authoritative newMeters in-place — no refetch on
-    // the success path. reloadItem() would briefly set item to undefined and
-    // unmount the snackbar + Undo affordance during a slow round-trip
-    // (lead Codex P2). The transaction is atomic; the SDK's local cache is
-    // already updated, so the in-memory shape matches the server post-commit.
+    // In-place setItem from authoritative boundary return — no refetch on
+    // success path (lead Codex P2: refetch unmounted Undo affordance).
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     setLastMovement({ movementId: r.data.movementId, oldMeters: params.expectedOldMeters, newMeters: r.data.newMeters });
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
@@ -341,7 +363,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const onHand = item.remainingMeters;
   const previewLabel = targetNewMeters === null ? formatMeters(onHand) : `${formatMeters(onHand)} → ${formatMeters(targetNewMeters)}`;
   const deltaLabel = delta === null ? '' : `${delta > 0 ? '+' : ''}${formatMeters(delta).replace(/^-/, '−')}`;
-  const deltaClass = delta === null || delta === 0 ? 'bg-gray-100 text-gray-600'
+  const noChange = targetNewMeters !== null && meterEquals(targetNewMeters, onHand);
+  const deltaClass = delta === null || noChange ? 'bg-gray-100 text-gray-600'
     : delta > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
   const saveLabel = targetNewMeters === null ? 'Save' : `Save ${formatMeters(onHand)} → ${formatMeters(targetNewMeters)}`;
 
@@ -395,7 +418,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
         <span className="text-base text-gray-800">{previewLabel}</span>
         {deltaLabel ? <span className={`rounded px-2 py-0.5 text-xs font-medium ${deltaClass}`}>{deltaLabel}</span> : null}
         {targetNewMeters !== null && targetNewMeters < 0 ? <span className="text-xs text-red-700">Cannot go below zero.</span> : null}
-        {parsed !== null && delta === 0 ? <span className="text-xs text-gray-600">No change to save.</span> : null}
+        {parsed !== null && noChange ? <span className="text-xs text-gray-600">No change to save.</span> : null}
       </div>
 
       <fieldset className="mb-4">
