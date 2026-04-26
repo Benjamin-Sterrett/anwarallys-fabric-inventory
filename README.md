@@ -24,7 +24,7 @@ Locked in `research/synthesis.md` §3:
 | Styling | Tailwind v4 via `@tailwindcss/vite` |
 | State | React Context + Firestore `onSnapshot` (no Redux/Zustand) |
 | Backend | Firebase client SDK v10+ (Auth + Firestore) |
-| Hosting | Cloudflare Pages (git-push deploy, static SPA) |
+| Hosting | Cloudflare Pages (deploy via GitHub Actions, static SPA) |
 | Package manager | pnpm |
 
 No SSR. No `firebase-admin`. No server-side anything — Firestore Security Rules are the entire authz surface.
@@ -66,14 +66,16 @@ These values are intentionally client-safe. Firebase's own docs treat the web co
 
 ## Deploy flow
 
-Cloudflare Pages watches `main`:
+Production deploys run via **GitHub Actions** (`.github/workflows/deploy.yml`), not Cloudflare Pages' native git integration. Cloudflare Pages still hosts; the project's `Git Provider` is intentionally `No` because the account owner has no GitHub. The workflow builds with pnpm and pushes the bundle through `cloudflare/wrangler-action@v3` using a scoped API token.
 
-1. Open PR → CI runs typecheck + build.
-2. Merge to `main` → Cloudflare Pages builds and deploys automatically.
+1. Open PR → `ci.yml` runs typecheck + build.
+2. Merge to `main` → `deploy.yml` builds, then `wrangler pages deploy dist/` lands at `anwarallysinventory.pages.dev` within ~60s.
 3. Firestore rules and indexes deploy via Firebase CLI separately:
    ```bash
    firebase deploy --only firestore:rules,firestore:indexes
    ```
+
+Required repo secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and the six `VITE_FIREBASE_*` values from the project's Firebase web config (already set; rotate when Firebase config rotates). Reusable recipe: `~/.claude/reference/cloudflare-pages-github-actions.md`.
 
 `public/_redirects` ships `/* /index.html 200` so hard reloads on `/i/abc123` (QR scan links) serve the SPA shell instead of 404.
 

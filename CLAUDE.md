@@ -8,10 +8,10 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - `linear issue start PRJ-##` — start working on an issue
 
 ## Current Status
-- **Phase:** Wave 1 — Scaffold merged, infrastructure live; awaiting client answers + Pages deploy
-- **Last:** **PRJ-778 MERGED** (PR #1, squash `2b5906d3`) — Vite 6 + React 19 + TS strict + Tailwind v4 + Firebase 10 client SDK scaffold on main. 5 Codex review rounds all resolved. PRJ-807 closed. (2026-04-23 late)
-- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + 13 ticket descriptions updated + repo public + CI green + **scaffold live**
-- **Next:** (1) Client WhatsApp answers to `research/client-questions.md`. (2) Client OAuths Cloudflare Pages to GitHub repo → first deploy lands at their URL. (3) PRJ-804 validation checklist (now that deployed skeleton exists, check #4 Safari auth is actually runnable).
+- **Phase:** Wave 1 — Scaffold merged, auto-deploy live; ready to start schema (PRJ-779)
+- **Last:** **PRJ-835** in flight — GitHub Actions auto-deploy to Cloudflare Pages (replaces native CF Pages OAuth path; client has no GitHub). **PRJ-778 MERGED** previously (PR #1, squash `2b5906d3`) — full scaffold on main.
+- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + 13 ticket descriptions updated + repo public + CI green + scaffold live + GitHub Actions auto-deploy.
+- **Next:** (1) Client WhatsApp answers to `research/client-questions.md` (staff nicknames, label sizes). (2) PRJ-779 (Firestore schema, foundational). (3) PRJ-804 validation checklist (physical checks now that deployed skeleton is live).
 - **Handoff:** See `.handoff.md` for full session details + dependency order
 
 ## Project Management
@@ -51,7 +51,7 @@ Clean rebuild of a fragile AI-generated fabric-roll inventory prototype. One rol
 
 | Component | Technology |
 |-----------|------------|
-| Hosting | Cloudflare Pages (Git-push deploy, no SSR) |
+| Hosting | Cloudflare Pages (deploy via GitHub Actions, no SSR) |
 | Backend | Firebase / Firestore — **client SDK only**; Admin SDK forbidden in app path |
 | Frontend | Vite 6 + React 19 + TypeScript strict + pnpm + Tailwind v4, plain SPA |
 | Routing | `react-router-dom` v7 data-router, client-only |
