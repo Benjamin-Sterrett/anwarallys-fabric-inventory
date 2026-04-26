@@ -29,7 +29,9 @@ function buildUrl(itemId: string): string | null {
   if (!HOST || HOST.trim() === '') {
     return null;
   }
-  return `https://${HOST}/i/${encodeURIComponent(itemId)}`;
+  // Guard against accidental scheme inclusion in the env var
+  const host = HOST.trim().replace(/^https?:\/\//, '');
+  return `https://${host}/i/${encodeURIComponent(itemId)}`;
 }
 
 interface ErrorBoundaryState {
