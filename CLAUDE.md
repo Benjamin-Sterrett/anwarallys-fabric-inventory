@@ -8,11 +8,12 @@ Say: **"resume anwarallys"** — I'll check Linear for Anwarallys Fabric Invento
 - `linear issue start PRJ-##` — start working on an issue
 
 ## Current Status
-- **Phase:** Wave 1 — Schema + auto-deploy + data boundary shipped; next is Security Rules (PRJ-805) and auth UX (PRJ-781)
-- **Last:** **PRJ-780 MERGED** (PR #4, squash `333f812`) — Firebase data-access boundary: `getDb()` + Firestore w/ `persistentLocalCache` + `persistentMultipleTabManager`, `auth.ts` init scaffold, 4 typed `FirestoreDataConverter`s, query wrappers including `createMovementAndAdjustItem` with `runTransaction` + optimistic concurrency + NaN/Infinity + actor-attribution guards. 4 lead Codex rounds, 9 findings fixed in-PR (PRJ-843..845, PRJ-847..849, PRJ-850..852), 2 deferred under `owner_override` (PRJ-854, PRJ-855).
-- **Done:** Project scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets (PRJ-804/805/806) + repo public + CI green + scaffold live + auto-deploy + schema shipped + **data boundary shipped**.
-- **Next:** (1) **PRJ-805** Security Rules (Claude-only, CRITICAL — can start immediately, parallel-safe). (2) **PRJ-856** Self-service Staff page (replaces the seed-nicknames-from-WhatsApp plan; client adds/renames/deactivates staff himself). (3) **PRJ-781** Auth UX (no longer blocked on nicknames; ships after PRJ-805 + PRJ-856). (4) PRJ-854 / PRJ-855 follow-ups before any UI consumes `@/lib/queries`. (5) PRJ-841 (tests) + PRJ-842 (ESLint) follow-ups. (6) PRJ-804 validation checklist (physical checks).
-- **Open architectural debate:** PRJ-840 — read/write model split. Held unified shape for v1; revisit if pilot surfaces real misuse.
+- **Phase:** Wave 1 ~90% shipped — Schema + auto-deploy + data boundary + data-boundary follow-ups + **Security Rules** all merged. Next is the Self-service Staff page (PRJ-856) and Auth UX (PRJ-781).
+- **Last:** **PRJ-805 MERGED** (PR #7, squash `5aba220`) — Firestore Security Rules: full authz surface for `/folders`, `/items`, `/movements`, `/deletedRecords`, `/users`, `/config`. 4 lead Codex rounds, 7 findings fixed in-code (PRJ-857..859, 861..863, plus PRJ-860 superseded by PRJ-863), 2 deferred under `owner_override` (PRJ-865, PRJ-866 — both real but only exploitable by hostile clients bypassing the data boundary). Schema gained `RollItem.lastMovementId` for cross-doc enforcement of stock writes. **Folder soft-delete blocked entirely in v1** — Rules can't iterate `folderAncestors[]`, so PRJ-796 (Wave 5) owns the proper subtree-aware flow. Plus PRJ-854/855 (data-boundary follow-ups: serverTimestamps + FirebaseError code preservation, PR #6 squash `556a928`).
+- **Done:** Scaffold + Linear project + Waves 0–6 + 7-LLM discovery/synthesis + locked architecture + 3 gating tickets + repo public + CI green + auto-deploy + schema + data boundary + **data-boundary follow-ups** + **Security Rules**.
+- **Next:** (1) **PRJ-856** Self-service Staff page (admin self-services staff via in-app `/staff` page; consumes the new `/users/{uid}` rules). (2) **PRJ-781** Auth UX (sign-in widget every user sees; no longer blocked on nicknames). (3) PRJ-865 + PRJ-866 (Rules defense-in-depth follow-ups before pilot). (4) PRJ-841 (tests) + PRJ-842 (ESLint). (5) PRJ-804 validation checklist (physical checks).
+- **Bootstrap config Benjamin must set before PRJ-856 ships:** Shaaiz's email in Cloudflare Pages env as `VITE_ADMIN_EMAIL`; seed `/config/admin` doc with field `adminEmail` matching the env (Firebase Console); create the bootstrap Firebase Auth user (Shaaiz) in Console with `email_verified: true`; create matching `/users/{uid}` doc with `displayName` and `isActive: true`.
+- **Open architectural debate:** PRJ-840 — read/write model split. Held unified shape for v1.
 - **Handoff:** See `.handoff.md` for full session details + dependency order
 
 ## Project Management
@@ -129,4 +130,4 @@ IDENTIFY → DISCOVER → IMPLEMENT → VERIFY → DELIVER → PR-REVIEW → HAN
 2. Update "Current Status" block above.
 3. Commit any uncommitted work.
 
-**Last Updated:** 2026-04-26 (PRJ-780 merged, PR #4 squash `333f812`)
+**Last Updated:** 2026-04-26 (PRJ-805 + PRJ-854/855 merged, PRs #6 + #7)
