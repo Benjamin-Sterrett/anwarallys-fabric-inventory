@@ -32,7 +32,7 @@ import {
   getUserByUid,
   listMovementsForItem,
 } from '@/lib/queries';
-import type { Movement, MovementReason, RollItem } from '@/lib/models';
+import type { Movement, RollItem } from '@/lib/models';
 import RollLabel from '@/components/RollLabel';
 
 const UNDO_WINDOW_MS = 15_000;
@@ -42,17 +42,7 @@ const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center roun
 const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 
-// Mirror rolls-adjust.tsx labels — keeping copy consistent across surfaces
-// matters more than DRY here (REASONS extraction is out of scope).
-const REASON_LABEL: Record<MovementReason, string> = {
-  sold: 'Sold',
-  cut: 'Cut',
-  damage: 'Damage',
-  return: 'Return',
-  correction: 'Correction',
-  receive: 'Receive',
-  other: 'Other',
-};
+import { reasonLabel } from '@/components/ReasonChips';
 
 const round2dp = (n: number): number => Math.round(n * 100) / 100;
 function formatMeters(n: number): string {
@@ -355,7 +345,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
             {' '}<span className="text-gray-600">({formatDelta(lastMovement.deltaMeters)})</span>
           </p>
           <p className="mt-1 text-xs text-gray-700">
-            {REASON_LABEL[lastMovement.reason]} · {lastMovement.actorName} · {formatRelative(lastMovement.at, now)}
+            {reasonLabel(lastMovement.reason)} · {lastMovement.actorName} · {formatRelative(lastMovement.at, now)}
           </p>
           {submitError ? <p className="mt-2 text-sm text-red-700" role="alert">{submitError}</p> : null}
           <div className="mt-3">
@@ -421,7 +411,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
                     >{formatDelta(m.deltaMeters)}</span>
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-700">
-                    <span>{REASON_LABEL[m.reason]}</span>
+                    <span>{reasonLabel(m.reason)}</span>
                     <span aria-hidden className="text-gray-400">·</span>
                     <span>{m.actorName}</span>
                     <span aria-hidden className="text-gray-400">·</span>
