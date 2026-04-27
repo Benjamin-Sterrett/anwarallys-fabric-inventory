@@ -178,7 +178,7 @@ export async function listAllActiveItems(): Promise<Result<RollItem[]>> {
     try {
       return ok((await getDocsFromServer(q)).docs.map((d) => d.data()));
     } catch (e) {
-      if (e instanceof FirebaseError && e.code === 'firestore/unavailable') {
+      if (e instanceof FirebaseError && e.code === 'unavailable') {
         return ok((await getDocs(q)).docs.map((d) => d.data()));
       }
       throw e;

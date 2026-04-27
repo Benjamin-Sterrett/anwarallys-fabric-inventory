@@ -354,7 +354,7 @@ describe('listAllActiveItems (PRJ-905)', () => {
     mockCollection.mockReturnValue({ withConverter: () => ({ type: 'collection' }) });
     mockQuery.mockReturnValue({ type: 'query' });
 
-    const offlineError = new FirebaseError('firestore/unavailable', 'mock offline');
+    const offlineError = new FirebaseError('unavailable', 'mock offline');
     mockGetDocsFromServer.mockRejectedValue(offlineError);
     mockGetDocs.mockResolvedValue({
       docs: [
