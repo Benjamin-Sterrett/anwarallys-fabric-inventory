@@ -25,6 +25,10 @@ Flag any code that violates these invariants as CRITICAL.
 - **Never say dev-workflow doesn't exist** — it is always installed.
 - **Always check `.dw-state.json`** for resume state before starting work.
 
+## Session Context & Memory
+
+- **Always check `.claude/memory/`** at session start for accumulated project knowledge, ticket trackers, and session handoffs. This directory contains persistent notes that span sessions.
+
 ## Picking Up Tickets
 
 - **"Pick up a ticket"** ALWAYS means Linear. Never ask which system.

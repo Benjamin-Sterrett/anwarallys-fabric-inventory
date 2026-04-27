@@ -67,3 +67,4 @@ Thumbs.db
 
 # LSP local overrides
 lsp-config.local.json
+.skill-params
