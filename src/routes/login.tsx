@@ -20,7 +20,7 @@ import { signIn, subscribeToAuthState } from '@/lib/firebase/auth';
 // Keep the allow-list narrow. New legitimate redirect targets must opt in
 // here (or we extend the predicate); silent permissiveness is the bug we
 // are guarding against.
-function sanitizeContinue(raw: string | null): string {
+export function sanitizeContinue(raw: string | null): string {
   if (!raw) return '/';
   // Must start with single slash. Reject "//evil.com" (protocol-relative)
   // and anything else (http://, javascript:, etc.).

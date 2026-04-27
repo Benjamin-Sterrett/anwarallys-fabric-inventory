@@ -14,6 +14,7 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    setupFiles: ['./src/test-setup.ts'],
     reporters: process.env.CI ? ['default'] : ['default', 'verbose'],
   },
 });
