@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createItem, updateItem, listAllActiveItems } from './items';
 import { getDb } from '@/lib/firebase/app';
 import { addDoc, updateDoc } from 'firebase/firestore';
+import { FirebaseError } from 'firebase/app';
 
+const mockGetDocs = vi.hoisted(() => vi.fn());
 const mockGetDocsFromServer = vi.hoisted(() => vi.fn());
 const mockQuery = vi.hoisted(() => vi.fn());
 const mockCollection = vi.hoisted(() => vi.fn(() => ({ withConverter: () => ({}) })));
@@ -22,6 +24,7 @@ vi.mock('firebase/firestore', async () => {
     doc: vi.fn(() => ({ withConverter: () => ({}) })),
     collection: mockCollection,
     serverTimestamp: vi.fn(() => 'SERVER_TS'),
+    getDocs: mockGetDocs,
     getDocsFromServer: mockGetDocsFromServer,
     query: mockQuery,
     where: mockWhere,
@@ -342,5 +345,37 @@ describe('listAllActiveItems (PRJ-905)', () => {
     if (r.ok) {
       expect(r.data).toEqual([]);
     }
+  });
+
+  it('falls back to cache when offline (firestore/unavailable)', async () => {
+    const fakeDb = { type: 'firestore' };
+    vi.mocked(getDb).mockReturnValue(fakeDb as unknown as ReturnType<typeof getDb>);
+
+    mockCollection.mockReturnValue({ withConverter: () => ({ type: 'collection' }) });
+    mockQuery.mockReturnValue({ type: 'query' });
+
+    const offlineError = new FirebaseError('firestore/unavailable', 'mock offline');
+    mockGetDocsFromServer.mockRejectedValue(offlineError);
+    mockGetDocs.mockResolvedValue({
+      docs: [
+        {
+          data: () => ({
+            itemId: 'item-offline',
+            sku: 'SKU-OFFLINE',
+            remainingMeters: 7,
+            minimumMeters: 10,
+            deletedAt: null,
+          }),
+        },
+      ],
+    });
+
+    const r = await listAllActiveItems();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toHaveLength(1);
+      expect(r.data[0]!.sku).toBe('SKU-OFFLINE');
+    }
+    expect(mockGetDocs).toHaveBeenCalledTimes(1);
   });
 });
