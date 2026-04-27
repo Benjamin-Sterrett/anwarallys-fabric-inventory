@@ -21,3 +21,30 @@ body {
   background-color: #f9fafb;
   color: #111827;
 }
+
+/* ── Print styles for label routes ───────────────────────────────────────
+   These rules are scoped via a `.label-print-mode` class on <body> that
+   print routes add on mount and remove on unmount. This prevents the
+   global header/auth-bar hide from affecting unrelated print flows
+   (e.g., printing an item detail page from the browser menu).
+   The @page rule is injected dynamically by print-label.tsx so it can
+   vary per label size; it is NOT declared here.
+*/
+@media print {
+  body.label-print-mode {
+    background: white !important;
+  }
+
+  body.label-print-mode header,
+  body.label-print-mode [data-auth-bar],
+  body.label-print-mode .print-hide {
+    display: none !important;
+  }
+
+  body.label-print-mode #root,
+  body.label-print-mode main {
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}

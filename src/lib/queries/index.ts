@@ -13,6 +13,7 @@ export {
 } from './folders';
 export {
   getItemById, getItemByIdFromServer, createItem, updateItem, listActiveItemsInFolder,
+  listAllActiveItems,
   subscribeToActiveItemsInFolder,
   type GetItemByIdOptions, type CreateItemParams, type UpdateItemParams,
 } from './items';

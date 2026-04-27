@@ -134,6 +134,28 @@ export async function listActiveItemsInFolder(folderId: string): Promise<Result<
 }
 
 /**
+ * All active items across every folder. Sorted by sku asc.
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`, `firestore/unknown`.
+ */
+export async function listAllActiveItems(): Promise<Result<RollItem[]>> {
+  const dbR = resolveDb();
+  if (!dbR.ok) return dbR.result;
+  const { db } = dbR;
+  try {
+    const q = query(
+      collection(db, 'items').withConverter(itemConverter),
+      where('deletedAt', '==', null),
+      orderBy('sku'),
+    );
+    return ok((await getDocs(q)).docs.map((d) => d.data()));
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
  * Live subscription to active items directly in `folderId`. Sorted by sku asc.
  * Returns an SDK `Unsubscribe`; caller MUST invoke on cleanup. On `getDb()`
  * failure the returned unsubscribe is a no-op and `onError` fires once on the
