@@ -207,6 +207,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   // Mount-time server-authoritative read (R7 P1, PRJ-883 / PRJ-893): the
   // "Reload page" affordance is the only recovery path after an inconclusive
   // timeout, so cache-backed mount could rehydrate pre-commit `remainingMeters`
@@ -231,14 +232,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
   // Server-authoritative reload (R5 P1): cache can hold pre-commit state for
   // seconds after a transaction lands. Used on timeout + meters-mismatch
   // recovery so the operator never re-applies an adjustment that already
-  // succeeded. Returns true on success, false on server-read failure (caller
-  // shows "could not verify" — refusing any state is safer than wrong state).
+  // succeeded. Returns true on success, false on server-read failure.
+  // PRJ-885: on read failure preserve the last-known item and surface the
+  // error separately so the operator can retry without losing form context.
   const reloadItemFromServer = useCallback(async (): Promise<boolean> => {
-    setItem(undefined); setLoadError(null);
+    setVerifyError(null);
     const r = await getItemByIdFromServer(itemId);
     if (!r.ok) {
-      setItem(null);
-      setLoadError(`Could not verify the current on-hand from the server: ${r.error.message} (${r.error.code}). Refresh the page before retrying.`);
+      setVerifyError(`Could not verify the current on-hand from the server: ${r.error.message} (${r.error.code}). Refresh the page before retrying.`);
       return false;
     }
     if (!r.data) { setItem(null); setLoadError('That item is missing or has been deleted.'); return false; }
@@ -553,6 +554,11 @@ function AdjustPage({ itemId }: { itemId: string }) {
       {!online ? (
         <div className="sticky top-0 z-10 -mx-4 mb-3 bg-amber-100 px-4 py-2 text-sm text-amber-900">
           You are offline. Save is disabled until you reconnect.
+        </div>
+      ) : null}
+      {verifyError ? (
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm text-red-700">{verifyError}</p>
         </div>
       ) : null}
 
