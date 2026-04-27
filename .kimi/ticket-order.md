@@ -74,18 +74,18 @@
 
 ## PHASE 5 — return Kimi to Wave 5 simple work
 
-14. **PRJ-798 — Low-stock indicator on item-detail page**
+14. ~~**PRJ-798 — Low-stock indicator on item-detail page**~~ ✅ SHIPPED PR #41
     - Plain UI: read `item.minimumMeters` vs `item.remainingMeters`, show a badge. No new schema.
 
-15. **PRJ-799 — Error states audit + polish**
+15. ~~**PRJ-799 — Error states audit + polish**~~ ✅ SHIPPED PR #43
     - UX-focused sweep across existing routes.
 
 ---
 
 ## PRJ-841 Follow-ups (deferred scope — do NOT lose)
 
-- **PRJ-896** — Firestore boundary tests for safety-critical writes. High priority pre-pilot. Covers createMovementAndAdjustItem concurrency, query wrappers, getDb/getAuth.
-- **PRJ-897** — CI wire test:ci into GitHub Actions deploy.yml. Small infra. Makes test investment compound.
+- ~~**PRJ-896**~~ — ✅ SHIPPED PR #44 (2026-04-26) — Firestore boundary tests for safety-critical writes. 38 new tests covering getDb/getAuth init, createItem/updateItem validation, createMovementAndAdjustItem validation.
+- ~~**PRJ-897**~~ — ✅ SHIPPED PR #42 (2026-04-26) — CI wire `test:ci` into GitHub Actions deploy.yml.
 
 ## KEEP THESE ON CLAUDE — do NOT route to Kimi
 
@@ -112,4 +112,8 @@
 - [2026-04-26] PRJ-880 (PR #36 squash `c87818c`) — Client-side paging for items list in folder browse. PAGE_SIZE = 50 with Previous/Next + page indicator.
 - [2026-04-26] PRJ-841 (PR #38 squash `2a8775f`) — Vitest setup + first happy-path tests. **SCOPE GAP:** Firestore boundary tests (createMovementAndAdjustItem concurrency, query wrappers, getDb/getAuth) and CI test:ci wiring deferred to follow-up tickets.
 - [2026-04-26] PRJ-793 (PR #39 squash `2789f30`) — QR print/download. Single-label + batch print routes, size selector (50mm/30mm), `@page` CSS scoped to `.label-print-mode`, `RollLabel` printable mode, `listAllActiveItems` query. Firestore `(deletedAt, sku)` composite index added.
-- [2026-04-27] PRJ-794 (PR #40 squash `58e01df`) — QR scan landing route (`/i/:itemId`). Read-only item detail with auth redirect, skeleton loader with visible `itemId`, soft-deleted/not-found/error states, offline fallback to cache, server-authoritative first read.
+- [2026-04-26] PRJ-794 (PR #40 squash `58e01df`) — QR scan landing route (`/i/:itemId`). Read-only item detail with auth redirect, skeleton loader with visible `itemId`, soft-deleted/not-found/error states, offline fallback to cache, server-authoritative first read.
+- [2026-04-26] PRJ-798 (PR #41 squash `925794e`) — Low-stock indicator on item-detail page + low-stock list view (`/lowstock`).
+- [2026-04-26] PRJ-799 (PR #43 squash `698e4e7`) — Error states audit: `role="alert"` on error paragraphs + retry buttons across 7 route files.
+- [2026-04-26] PRJ-897 (PR #42 squash `c3d6c3e`) — CI wire `test:ci` into GitHub Actions.
+- [2026-04-26] PRJ-896 (PR #44 squash `0b34cb4`) — Firestore boundary tests: getDb/getAuth init, createItem/updateItem validation, createMovementAndAdjustItem validation (38 new tests).
