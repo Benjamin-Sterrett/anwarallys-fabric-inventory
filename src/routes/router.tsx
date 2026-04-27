@@ -35,7 +35,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <RequireAuth><DashboardRoute /></RequireAuth> },
       { path: 'login', element: <LoginRoute /> },
-      { path: 'i/:itemId', element: <RequireAuth><ItemRoute /></RequireAuth> },
+      { path: 'i/:itemId', element: <ItemRoute /> },
       { path: 'rolls/:id/adjust', element: <RequireAuth><RollsAdjustRoute /></RequireAuth> },
       { path: 'folders/:id', element: <RequireAuth><FolderRoute /></RequireAuth> },
       // PRJ-784: item create + edit forms. Create is folder-scoped so the
