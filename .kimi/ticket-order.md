@@ -1,6 +1,6 @@
 # Kimi Ticket Order — Anwarallys Fabric Inventory
 
-**Last updated:** 2026-04-26 (Kimi session — 9 tickets shipped, PRJ-893 shipped despite Claude-gate, see note)
+**Last updated:** 2026-04-27 (PRJ-793 + PRJ-794 merged; 12 tickets shipped, see Shipped)
 **Source of truth:** this file. Original Telegram message preserved here.
 
 ## How to use this file
@@ -60,16 +60,17 @@
 
 10. **~~PRJ-891~~ — Pre-pilot wipe of smoke residue** ✅ SHIPPED 2026-04-26 (Claude executed via `firebase firestore:delete` after deploying Rules+indexes; all 5 docs gone, Linear closed)
 
-11. **PRJ-841 — Vitest setup + first happy-path tests**
+11. **~~PRJ-841~~ — Vitest setup + first happy-path tests** ✅ SHIPPED PR #38
     - Mechanical infra ticket. Unblocks PRJ-872, PRJ-875, PRJ-881.
+    - **SCOPE GAP:** Firestore boundary tests (createMovementAndAdjustItem concurrency, query wrappers, getDb/getAuth) and CI test:ci wiring deferred to follow-up tickets.
 
 ## PHASE 4 — QR continuation
 
-12. **PRJ-793 — QR print/download**
+12. **~~PRJ-793~~ — QR print/download** ✅ SHIPPED PR #39
     - Builds on PRJ-792. Small, visually verifiable.
 
-13. **PRJ-794 — QR scan landing route (`/i/{itemId}`)**
-    - Tiny route — just navigates to the existing `/items/{itemId}` detail page.
+13. **~~PRJ-794~~ — QR scan landing route (`/i/{itemId}`)** ✅ SHIPPED PR #40
+    - Read-only item detail with auth handling, loading skeleton, and deleted-item states.
 
 ## PHASE 5 — return Kimi to Wave 5 simple work
 
@@ -80,6 +81,11 @@
     - UX-focused sweep across existing routes.
 
 ---
+
+## PRJ-841 Follow-ups (deferred scope — do NOT lose)
+
+- **PRJ-896** — Firestore boundary tests for safety-critical writes. High priority pre-pilot. Covers createMovementAndAdjustItem concurrency, query wrappers, getDb/getAuth.
+- **PRJ-897** — CI wire test:ci into GitHub Actions deploy.yml. Small infra. Makes test investment compound.
 
 ## KEEP THESE ON CLAUDE — do NOT route to Kimi
 
@@ -104,3 +110,6 @@
 - [2026-04-26] PRJ-882 (PR #33 squash `9bab49a`) — Validate parent folder active before edit submit.
 - [2026-04-26] PRJ-893 (PR #34 squash `535095b`) — Server-authoritative mount reads on safety-critical routes. *Originally Claude-gated; scope was smaller than expected.*
 - [2026-04-26] PRJ-880 (PR #36 squash `c87818c`) — Client-side paging for items list in folder browse. PAGE_SIZE = 50 with Previous/Next + page indicator.
+- [2026-04-26] PRJ-841 (PR #38 squash `2a8775f`) — Vitest setup + first happy-path tests. **SCOPE GAP:** Firestore boundary tests (createMovementAndAdjustItem concurrency, query wrappers, getDb/getAuth) and CI test:ci wiring deferred to follow-up tickets.
+- [2026-04-26] PRJ-793 (PR #39 squash `2789f30`) — QR print/download. Single-label + batch print routes, size selector (50mm/30mm), `@page` CSS scoped to `.label-print-mode`, `RollLabel` printable mode, `listAllActiveItems` query. Firestore `(deletedAt, sku)` composite index added.
+- [2026-04-27] PRJ-794 (PR #40 squash `58e01df`) — QR scan landing route (`/i/:itemId`). Read-only item detail with auth redirect, skeleton loader with visible `itemId`, soft-deleted/not-found/error states, offline fallback to cache, server-authoritative first read.

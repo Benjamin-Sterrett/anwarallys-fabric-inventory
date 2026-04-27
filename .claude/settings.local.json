@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f .dw-state.json .task-progress.json .debug-report.md)",
+      "Bash(rm -f .claude/debug-state.json)",
+      "Bash(rm -f .verification-evidence-PRJ-886.md .code-review-evidence-PRJ-886.md)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(jq '.phase = \"complete\" | .root_cause_proven = true | .hypotheses_tested = 1 | .internal_check_done = true' .claude/debug-state.json)",
+      "Bash(mv .claude/debug-state.json.tmp .claude/debug-state.json)"
+    ]
+  }
+}

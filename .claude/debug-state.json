@@ -1,0 +1,11 @@
+{
+  "phase": "D5",
+  "tier": "Quick",
+  "issue_id": "PRJ-878",
+  "started": "2026-04-26T22:42:00Z",
+  "hypotheses_tested": 1,
+  "hypotheses_falsified": 0,
+  "failed_fix_attempts": 0,
+  "internal_check_done": true,
+  "root_cause_proven": true
+}
