@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createItem, updateItem } from './items';
+import { createItem, updateItem, listAllActiveItems } from './items';
 import { getDb } from '@/lib/firebase/app';
 import { addDoc, updateDoc } from 'firebase/firestore';
+
+const mockGetDocsFromServer = vi.hoisted(() => vi.fn());
+const mockQuery = vi.hoisted(() => vi.fn());
+const mockCollection = vi.hoisted(() => vi.fn(() => ({ withConverter: () => ({}) })));
+const mockWhere = vi.hoisted(() => vi.fn());
+const mockOrderBy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/firebase/app', () => ({
   getDb: vi.fn(),
@@ -14,8 +20,12 @@ vi.mock('firebase/firestore', async () => {
     addDoc: vi.fn(),
     updateDoc: vi.fn(),
     doc: vi.fn(() => ({ withConverter: () => ({}) })),
-    collection: vi.fn(() => ({ withConverter: () => ({}) })),
+    collection: mockCollection,
     serverTimestamp: vi.fn(() => 'SERVER_TS'),
+    getDocsFromServer: mockGetDocsFromServer,
+    query: mockQuery,
+    where: mockWhere,
+    orderBy: mockOrderBy,
   };
 });
 
@@ -273,5 +283,64 @@ describe('updateItem', () => {
     const call = vi.mocked(updateDoc).mock.calls[0]!;
     const [, pload] = call;
     expect((pload as unknown as Record<string, unknown>).sku).toBe('SKU-123');
+  });
+});
+
+describe('listAllActiveItems (PRJ-905)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns only active items from server', async () => {
+    const fakeDb = { type: 'firestore' };
+    vi.mocked(getDb).mockReturnValue(fakeDb as unknown as ReturnType<typeof getDb>);
+
+    mockCollection.mockReturnValue({ withConverter: () => ({ type: 'collection' }) });
+    mockQuery.mockReturnValue({ type: 'query' });
+    mockGetDocsFromServer.mockResolvedValue({
+      docs: [
+        {
+          data: () => ({
+            itemId: 'item-1',
+            sku: 'SKU-1',
+            remainingMeters: 5,
+            minimumMeters: 10,
+            deletedAt: null,
+          }),
+        },
+        {
+          data: () => ({
+            itemId: 'item-2',
+            sku: 'SKU-2',
+            remainingMeters: 20,
+            minimumMeters: 10,
+            deletedAt: null,
+          }),
+        },
+      ],
+    });
+
+    const r = await listAllActiveItems();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toHaveLength(2);
+      expect(r.data[0]!.sku).toBe('SKU-1');
+      expect(r.data[1]!.sku).toBe('SKU-2');
+    }
+  });
+
+  it('returns empty array when no items exist', async () => {
+    const fakeDb = { type: 'firestore' };
+    vi.mocked(getDb).mockReturnValue(fakeDb as unknown as ReturnType<typeof getDb>);
+
+    mockCollection.mockReturnValue({ withConverter: () => ({ type: 'collection' }) });
+    mockQuery.mockReturnValue({ type: 'query' });
+    mockGetDocsFromServer.mockResolvedValue({ docs: [] });
+
+    const r = await listAllActiveItems();
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toEqual([]);
+    }
   });
 });

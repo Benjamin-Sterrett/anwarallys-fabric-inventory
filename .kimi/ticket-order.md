@@ -1,6 +1,6 @@
 # Kimi Ticket Order — Anwarallys Fabric Inventory
 
-**Last updated:** 2026-04-27 (PRJ-793 + PRJ-794 merged; 12 tickets shipped, see Shipped)
+**Last updated:** 2026-04-27 (PRJ-872 + PRJ-881 + PRJ-875 merged; see Shipped)
 **Source of truth:** this file. Original Telegram message preserved here.
 
 ## How to use this file
@@ -89,12 +89,12 @@
 
 ## KEEP THESE ON CLAUDE — do NOT route to Kimi
 
-- **PRJ-892** — Write-side idempotency (Movement schema + Rules + boundary). Self-replay defense, safety-critical. PRJ-883 R9 owner_override comp action.
+- ~~**PRJ-892**~~ — ✅ SHIPPED PR #50 (2026-04-27) — Write-side idempotency (Movement schema + Rules + boundary). Self-replay defense, safety-critical. PRJ-883 R9 owner_override comp action.
 - **~~PRJ-893~~** — Server-authoritative mount-time reads audit. **SHIPPED BY KIMI PR #34** (see Shipped). Was originally Claude-gated, but scope was smaller than expected (rolls-adjust already had server read; only staff.tsx + comments needed). Retaining in Claude-gate list for future tickets of this class.
 - **PRJ-888** — CI auto-deploy of Firestore Rules + indexes. Infra/CI, gated on Shaaiz minting an SA key.
 - **PRJ-796** — Soft-delete + 7-day retention. Rules-heavy, transactional, subtree-aware UI checks.
 - **PRJ-797** — Restore from `/deletedRecords`. Pairs with PRJ-796.
-- **PRJ-872 / PRJ-875 / PRJ-881** — tests for safety-critical boundary code (`createStaffUser` rollback, route guards, write boundary). Once PRJ-841 lands tooling, Claude can ship tests.
+- (none remaining in this section)
 
 ---
 
@@ -117,3 +117,7 @@
 - [2026-04-26] PRJ-799 (PR #43 squash `698e4e7`) — Error states audit: `role="alert"` on error paragraphs + retry buttons across 7 route files.
 - [2026-04-26] PRJ-897 (PR #42 squash `c3d6c3e`) — CI wire `test:ci` into GitHub Actions.
 - [2026-04-26] PRJ-896 (PR #44 squash `0b34cb4`) — Firestore boundary tests: getDb/getAuth init, createItem/updateItem validation, createMovementAndAdjustItem validation (38 new tests).
+- [2026-04-27] PRJ-872 (PR #47 squash `e998d95`) — 16 tests for `createStaffUser` rollback paths. Lead Codex: owner_override on happy-path coverage (out-of-scope per ticket spec).
+- [2026-04-27] PRJ-881 (PR #48 squash `7082574`) — 4 payload-integrity tests for createItem/updateItem. Lead Codex: APPROVE (1 MEDIUM: itemId not in forbidden list — non-blocking).
+- [2026-04-27] PRJ-875 (PR #49 squash `89881b9`) — Added @testing-library/react + jest-dom + user-event. 9 tests: sanitizeContinue exhaustive, login flow (unsafe continue fallback, signed-in short-circuit, 6 error code surfaces), RequireAuth redirect, RequireAdmin gate. Lead Codex: APPROVE (clean pass).
+- [2026-04-27] PRJ-892 (PR #50 squash `f5695ff`) — Write-side idempotency for stock-adjustment retries. Deterministic movement doc IDs (`movementRef.id === correlationId`), transaction reads movement before item, `already-applied` error + late-success UI path, `SaveState` replaces `inconclusivePending`, `actorUid` scoping restored in `findMovementByCorrelationId` (Codex R2). Lead Codex R3: APPROVE (1 LOW: query vs direct doc lookup optimization note).
