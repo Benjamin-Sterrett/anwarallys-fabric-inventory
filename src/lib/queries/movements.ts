@@ -10,8 +10,8 @@ import { FirebaseError } from 'firebase/app';
 import {
   collection,
   doc,
+  getDocFromServer,
   getDocs,
-  getDocsFromServer,
   limit as queryLimit,
   orderBy,
   query,
@@ -63,6 +63,7 @@ const ITEM_MISSING = 'item-missing';
 const METERS_MISMATCH = 'meters-mismatch';
 const INVALID_METERS = 'invalid-meters';
 const STALE_REVERSAL = 'stale-reversal';
+const ALREADY_APPLIED = 'already-applied';
 
 function isValidMeters(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -130,13 +131,15 @@ export async function createMovementAndAdjustItem(
     if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
     db = maybeDb;
     itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
-    movementRef = doc(collection(db, 'movements')).withConverter(movementConverter);
+    movementRef = doc(db, 'movements', correlationId).withConverter(movementConverter);
   } catch (e: unknown) {
     return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
   }
 
   try {
     const result = await runTransaction(db, async (tx) => {
+      const movementSnap = await tx.get(movementRef);
+      if (movementSnap.exists()) throw new Error(ALREADY_APPLIED);
       const snap = await tx.get(itemRef);
       if (!snap.exists()) throw new Error(ITEM_MISSING);
       const liveItem = snap.data();
@@ -197,6 +200,7 @@ export async function createMovementAndAdjustItem(
     if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
     if (message === INVALID_METERS) return err('invalid-meters', 'Live remainingMeters is not a finite, non-negative number.');
     if (message === STALE_REVERSAL) return err('stale-reversal', 'Another adjustment ran after this one. Refresh and try again.');
+    if (message === ALREADY_APPLIED) return err('already-applied', 'This adjustment was already saved earlier.');
     // Preserve the SDK error code (permission-denied from Security Rules,
     // failed-precondition from missing index, unavailable when offline,
     // aborted from tx contention, etc.) so callers can react accurately.
@@ -257,11 +261,11 @@ export async function listMovementsForItem(
 }
 
 /**
- * Reconciliation lookup for the timeout path (PRJ-883). Given the
+ * Reconciliation lookup for the timeout path (PRJ-883 / PRJ-892). Given the
  * caller's pre-generated `clientCorrelationId`, returns the matching
  * Movement (if it committed) or `null` (if no doc exists yet).
  *
- * Server-only read (R1 P1): uses `getDocsFromServer` rather than
+ * Server-only read (R1 P1): uses `getDocFromServer` rather than
  * `getDocs`. Same reasoning as `getItemByIdFromServer` (PRJ-787 R5):
  * the persistent local cache can hold a pending `/movements` write for
  * several seconds before the server ACKs. A cache-satisfied lookup
@@ -270,33 +274,14 @@ export async function listMovementsForItem(
  * write. Caller MUST handle `firestore/unavailable` (offline / no
  * server reachable) — there is no cache fallback by design.
  *
- * Triply-scoped for ownership + replay safety:
- *   - `clientCorrelationId` (user-supplied UUID v4 — accidental reuse
- *      is statistically impossible given the v4 entropy budget).
- *   - `itemId` (narrows to the save attempt's intended target).
- *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
- *      by any active staff and Rules only validate `clientCorrelationId`
- *      as a non-empty string. A devtools-savvy staff member could copy
- *      another's correlation id; if their own write times out, the
- *      reconcile lookup could return the copied movement → false
- *      late-success / Undo state for a write that never happened. Rules
- *      already enforce `actorUid == auth.uid` on movements/create, so
- *      forging the field on WRITE is impossible — but READ access is
- *      shared. The `actorUid` equality filter closes that read-side
- *      leak. Caller passes the current user's uid.)
+ * Uses direct doc lookup by `clientCorrelationId`, which now equals the
+ * movement doc id (PRJ-892 deterministic doc ID). The defensive `itemId`
+ * cross-check is the safety mechanism — if the found movement targets a
+ * different item, the lookup returns `null`.
  *
- * Self-replay (an authenticated staff member deliberately reusing one of
- * their OWN earlier correlation ids via devtools to coerce a false
- * late-success on a future save) is NOT defended at this layer. The
- * earlier R2/R3/R5 attempt to time-bound the query by `item.updatedAt`
- * had a fundamental flaw: in a successful transaction `serverTimestamp()`
- * resolves to the SAME `request.time` for both `movement.at` and
- * `item.updatedAt`, so `at >= updatedAt` STILL matched the previous
- * movement — the time-bound never closed the replay window it was
- * supposed to close. The correct fix is write-side idempotency
- * (rejecting reused `clientCorrelationId` values at commit time);
- * tracked as PRJ-892. The realistic threat model for the pilot
- * environment makes the gap acceptable until that ticket lands.
+ * Write-side idempotency (PRJ-892) makes read-side actor scoping
+ * unnecessary: the transaction rejects reused `clientCorrelationId`
+ * values at commit time, so a self-replay is impossible.
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query
@@ -314,11 +299,9 @@ export async function listMovementsForItem(
 export async function findMovementByCorrelationId(
   itemId: string,
   clientCorrelationId: string,
-  actorUid: string,
 ): Promise<Result<Movement | null>> {
   if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
   if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
-  if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
 
   let db: Firestore;
   try {
@@ -330,15 +313,12 @@ export async function findMovementByCorrelationId(
   }
 
   try {
-    const q = query(
-      collection(db, 'movements').withConverter(movementConverter),
-      where('clientCorrelationId', '==', clientCorrelationId),
-      where('itemId', '==', itemId),
-      where('actorUid', '==', actorUid),
-      queryLimit(1),
-    );
-    const docs = (await getDocsFromServer(q)).docs;
-    return ok(docs.length === 0 ? null : (docs[0]?.data() ?? null));
+    const movementRef = doc(db, 'movements', clientCorrelationId).withConverter(movementConverter);
+    const snap = await getDocFromServer(movementRef);
+    if (!snap.exists()) return ok(null);
+    const movement = snap.data();
+    if (movement.itemId !== itemId) return ok(null);
+    return ok(movement);
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
