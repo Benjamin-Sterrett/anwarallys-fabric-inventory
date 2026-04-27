@@ -63,6 +63,7 @@ const ITEM_MISSING = 'item-missing';
 const METERS_MISMATCH = 'meters-mismatch';
 const INVALID_METERS = 'invalid-meters';
 const STALE_REVERSAL = 'stale-reversal';
+const ALREADY_APPLIED = 'already-applied';
 
 function isValidMeters(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -130,13 +131,15 @@ export async function createMovementAndAdjustItem(
     if (!maybeDb) return err('firestore/no-db', 'Firebase is not configured.');
     db = maybeDb;
     itemRef = doc(db, 'items', params.itemId).withConverter(itemConverter);
-    movementRef = doc(collection(db, 'movements')).withConverter(movementConverter);
+    movementRef = doc(db, 'movements', correlationId).withConverter(movementConverter);
   } catch (e: unknown) {
     return err('firestore/init-failed', e instanceof Error ? e.message : String(e));
   }
 
   try {
     const result = await runTransaction(db, async (tx) => {
+      const movementSnap = await tx.get(movementRef);
+      if (movementSnap.exists()) throw new Error(ALREADY_APPLIED);
       const snap = await tx.get(itemRef);
       if (!snap.exists()) throw new Error(ITEM_MISSING);
       const liveItem = snap.data();
@@ -197,6 +200,7 @@ export async function createMovementAndAdjustItem(
     if (message === METERS_MISMATCH) return err('meters-mismatch', 'Stock changed in another session. Refresh and try again.');
     if (message === INVALID_METERS) return err('invalid-meters', 'Live remainingMeters is not a finite, non-negative number.');
     if (message === STALE_REVERSAL) return err('stale-reversal', 'Another adjustment ran after this one. Refresh and try again.');
+    if (message === ALREADY_APPLIED) return err('already-applied', 'This adjustment was already saved earlier.');
     // Preserve the SDK error code (permission-denied from Security Rules,
     // failed-precondition from missing index, unavailable when offline,
     // aborted from tx contention, etc.) so callers can react accurately.
@@ -257,7 +261,7 @@ export async function listMovementsForItem(
 }
 
 /**
- * Reconciliation lookup for the timeout path (PRJ-883). Given the
+ * Reconciliation lookup for the timeout path (PRJ-883 / PRJ-892). Given the
  * caller's pre-generated `clientCorrelationId`, returns the matching
  * Movement (if it committed) or `null` (if no doc exists yet).
  *
@@ -270,33 +274,11 @@ export async function listMovementsForItem(
  * write. Caller MUST handle `firestore/unavailable` (offline / no
  * server reachable) — there is no cache fallback by design.
  *
- * Triply-scoped for ownership + replay safety:
- *   - `clientCorrelationId` (user-supplied UUID v4 — accidental reuse
- *      is statistically impossible given the v4 entropy budget).
- *   - `itemId` (narrows to the save attempt's intended target).
- *   - `actorUid` (R1 P2 / lead Codex round 1: `/movements` is readable
- *      by any active staff and Rules only validate `clientCorrelationId`
- *      as a non-empty string. A devtools-savvy staff member could copy
- *      another's correlation id; if their own write times out, the
- *      reconcile lookup could return the copied movement → false
- *      late-success / Undo state for a write that never happened. Rules
- *      already enforce `actorUid == auth.uid` on movements/create, so
- *      forging the field on WRITE is impossible — but READ access is
- *      shared. The `actorUid` equality filter closes that read-side
- *      leak. Caller passes the current user's uid.)
- *
- * Self-replay (an authenticated staff member deliberately reusing one of
- * their OWN earlier correlation ids via devtools to coerce a false
- * late-success on a future save) is NOT defended at this layer. The
- * earlier R2/R3/R5 attempt to time-bound the query by `item.updatedAt`
- * had a fundamental flaw: in a successful transaction `serverTimestamp()`
- * resolves to the SAME `request.time` for both `movement.at` and
- * `item.updatedAt`, so `at >= updatedAt` STILL matched the previous
- * movement — the time-bound never closed the replay window it was
- * supposed to close. The correct fix is write-side idempotency
- * (rejecting reused `clientCorrelationId` values at commit time);
- * tracked as PRJ-892. The realistic threat model for the pilot
- * environment makes the gap acceptable until that ticket lands.
+ * The `actorUid` scoping is kept per Codex R2 (PRJ-892): without it, a
+ * read-side leak via correlation-id injection could grant false
+ * late-success on another actor's movement. Write-side idempotency
+ * prevents the double-write, but the reconcile lookup must still verify
+ * ownership before surfacing "Saved" + Undo to the caller.
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query

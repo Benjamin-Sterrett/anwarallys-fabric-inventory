@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
@@ -72,6 +73,7 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'firestore/unavailable': return 'You appear to be offline. Reconnect and try again.';
     case 'firestore/aborted': return 'Another save happened first. Refresh and retry.';
     case 'timeout': return 'Save took too long. Check your internet and retry.';
+    case 'already-applied': return 'This adjustment was already saved earlier.';
     default: return `${fallback} (${code})`;
   }
 }
@@ -111,13 +113,8 @@ async function reconcileTimedOutSave(
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    // Lookup is scoped by (clientCorrelationId, itemId, actorUid). The
-    // earlier `at >= item.updatedAt` time-bound (R2/R3/R5) was removed in
-    // R6: in a successful tx `serverTimestamp()` resolves to the SAME
-    // `request.time` for both `movement.at` and `item.updatedAt`, so
-    // `at >= updatedAt` matched the previous movement and never closed
-    // the replay window. Self-replay defense moves to write-side
-    // idempotency (PRJ-892); v4 UUID + actor scoping cover the rest.
+    // PRJ-892: query by correlationId + itemId + actorUid. Actor scoping
+    // prevents read-side leak via correlation-id injection (Codex R2).
     const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
     if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
     // r.ok && r.data === null  → not yet observed; keep polling.
@@ -270,14 +267,18 @@ function AdjustPage({ itemId }: { itemId: string }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
   const [lastMovement, setLastMovement] = useState<{ movementId: string; oldMeters: number; newMeters: number } | null>(null);
+  // PRJ-892: write-side idempotency. Stash the correlationId across retries
+  // so a timed-out save can be retried with the same idempotent key.
+  const [pendingCorrelationId, setPendingCorrelationId] = useState<string | null>(null);
   // R2 P1 / lead Codex round 2: when the timeout-reconcile probe is
   // inconclusive, the on-screen on-hand cannot be trusted (the original
   // transaction can still commit AFTER our last poll, so a fresh
   // server read can return PRE-commit meters). The only safe posture is
-  // to disable the form and force the operator to manually reload —
-  // page reload guarantees a fresh snapshot after the SDK has had time
-  // to settle the in-flight transaction. There is no auto-recovery.
-  const [inconclusivePending, setInconclusivePending] = useState(false);
+  // to disable the form and force the operator to manually reload or
+  // retry with the same idempotent key — page reload guarantees a fresh
+  // snapshot after the SDK has had time to settle the in-flight transaction.
+  type SaveState = 'idle' | 'submitting' | 'inconclusive' | 'late-success' | 'error';
+  const [saveState, setSaveState] = useState<SaveState>('idle');
 
   useEffect(() => {
     if (!lastMovement) return;
@@ -322,7 +323,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     && targetNewMeters !== item.remainingMeters;
   const noteTrimmed = note.trim();
   const noteValid = reason !== 'other' || (noteTrimmed.length >= NOTE_MIN_OTHER && noteTrimmed.length <= NOTE_MAX);
-  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc && !inconclusivePending;
+  const saveEnabled = online && previewValid && reason !== null && noteValid && !submitting && !!item && !!userDoc && saveState !== 'inconclusive';
 
   const stepBy = useCallback((amount: number) => {
     setMetersInput((cur) => {
@@ -347,7 +348,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const onConfirm = useCallback(async () => {
     if (!item || !authUser || !userDoc || targetNewMeters === null || reason === null) return;
-    setSubmitting(true); setSubmitError(null);
+    setSubmitting(true); setSubmitError(null); setSaveState('submitting');
     // Re-fetch userDoc fresh (R6 P2): admin may have renamed this staff via
     // /staff while this tab stayed open. Security Rules require actorName ===
     // /users/{uid}.displayName; a stale cached value would silently fail with
@@ -356,14 +357,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (!freshUser.ok || !freshUser.data) {
       setSubmitting(false);
       setConfirmOpen(false);
+      setSaveState('error');
       setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
       return;
     }
     setUserDoc(freshUser.data);
-    // PRJ-883: pre-generate the correlation id so we can reconcile if
-    // the client-side timeout fires before the boundary's success
-    // result lands. Fresh per attempt — never replayed across saves.
-    const correlationId = randomUUIDv4();
+    // PRJ-892: reuse pending correlationId for retries, else generate fresh.
+    const correlationId = pendingCorrelationId ?? randomUUIDv4();
+    if (!pendingCorrelationId) setPendingCorrelationId(correlationId);
     // Asymmetry intentional (R2 P1.d): expectedOldMeters raw (boundary
     // strict-equals stored value); newMeters rounded (parser rounds at parse).
     const params = {
@@ -389,6 +390,30 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // branches: success, non-timeout error, found, inconclusive.
     setConfirmOpen(false);
     if (!r.ok) {
+      // PRJ-892: write-side idempotency handles already-applied directly.
+      if (r.error.code === 'already-applied') {
+        const lookup = await findMovementByCorrelationId(item.itemId, correlationId, authUser.uid);
+        if (lookup.ok && lookup.data) {
+          const m = lookup.data;
+          setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
+          // Only grant Undo if the movement is still within the 15-sec window.
+          const movementTime = m.at instanceof Timestamp ? m.at.toMillis() : Date.now();
+          if (Date.now() - movementTime < UNDO_WINDOW_MS) {
+            setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
+          }
+          setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
+          setMetersInput(''); setReason(null); setNote('');
+          setSubmitting(false);
+          setSaveState('idle');
+          setPendingCorrelationId(null);
+          return;
+        }
+        // If lookup fails or returns null, fall through to generic error
+        setSubmitError('This adjustment was already saved, but we could not retrieve the details. Reload the page to verify.');
+        setSubmitting(false);
+        setSaveState('error');
+        return;
+      }
       // PRJ-883: timeout reconciliation. The client-side `Promise.race`
       // timeout fires before the server has acknowledged commit, but the
       // transaction may still be in flight. Query `/movements` for the
@@ -420,10 +445,16 @@ function AdjustPage({ itemId }: { itemId: string }) {
           // window on slow networks.
           const m = outcome.movement;
           setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
-          setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
+          // Only grant Undo if the movement is still within the 15-sec window.
+          const movementTime = m.at instanceof Timestamp ? m.at.toMillis() : Date.now();
+          if (Date.now() - movementTime < UNDO_WINDOW_MS) {
+            setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
+          }
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
           setSubmitting(false);
+          setSaveState('idle');
+          setPendingCorrelationId(null);
           return;
         }
         // outcome.kind === 'inconclusive' — could still be in flight
@@ -433,11 +464,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
         // — operator would re-enter from a stale on-hand and double-
         // apply once the original lands). The only safe posture is to
         // disable the form entirely and force the operator to reload
-        // the page manually. Page reload guarantees a fresh snapshot
-        // after the SDK has had time to settle the in-flight tx. NO
-        // auto-recovery, NO Undo affordance, NO "safe to retry" claim.
-        setInconclusivePending(true);
-        setSubmitError('Save took too long. The change may or may not have gone through. Reload this page to see the actual on-hand value before making any further changes.');
+        // the page manually or retry with the same idempotent key.
+        // Page reload guarantees a fresh snapshot after the SDK has had
+        // time to settle the in-flight tx. NO auto-recovery, NO Undo
+        // affordance, NO "safe to retry" claim.
+        setSaveState('inconclusive');
+        setPendingCorrelationId(correlationId);
+        setSubmitError('Save took too long. The change may or may not have gone through. You can retry with the same save ID, or reload the page to verify.');
         setSubmitting(false);
         return;
       }
@@ -447,10 +480,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
         setSubmitError('Stock changed in another session. Check the new on-hand and re-enter your adjustment.');
         void reloadItemFromServer();
         setSubmitting(false);
+        setSaveState('error');
+        setPendingCorrelationId(null);
         return;
       }
       setSubmitError(mapErrorCode(r.error.code, r.error.message));
       setSubmitting(false);
+      setSaveState('error');
       return;
     }
     // In-place setItem from authoritative boundary return — no refetch on
@@ -465,7 +501,9 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setSnack(`Saved: ${formatMeters(params.expectedOldMeters)} → ${formatMeters(r.data.newMeters)}`);
     setMetersInput(''); setReason(null); setNote('');
     setSubmitting(false);
-  }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer]);
+    setSaveState('idle');
+    setPendingCorrelationId(null);
+  }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer, pendingCorrelationId]);
 
   const onUndo = useCallback(async () => {
     if (!lastMovement || !authUser || !userDoc || !item) return;
@@ -574,10 +612,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
       <div className="mb-4 inline-flex rounded-md border border-gray-300 bg-white" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'sold'} onClick={() => onTab('sold')}
-          disabled={inconclusivePending}
+          disabled={saveState === 'inconclusive'}
           className={`${BTN_BASE} ${tab === 'sold' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Sold / used</button>
         <button type="button" role="tab" aria-selected={tab === 'exact'} onClick={() => onTab('exact')}
-          disabled={inconclusivePending}
+          disabled={saveState === 'inconclusive'}
           className={`${BTN_BASE} ${tab === 'exact' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Set to exact</button>
       </div>
 
@@ -590,16 +628,16 @@ function AdjustPage({ itemId }: { itemId: string }) {
             <button type="button" aria-label="Decrease"
               onPointerDown={() => startStep(-STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
-              disabled={inconclusivePending}
+              disabled={saveState === 'inconclusive'}
               className={`${BTN_SECONDARY} px-4`}>−</button>
             <input type="text" inputMode="decimal" autoComplete="off"
               value={metersInput} onChange={(e) => setMetersInput(e.target.value)}
-              disabled={inconclusivePending}
+              disabled={saveState === 'inconclusive'}
               placeholder="0" className={`${INPUT} flex-1 text-center text-lg disabled:bg-gray-100 disabled:opacity-50`} />
             <button type="button" aria-label="Increase"
               onPointerDown={() => startStep(STEP_NUDGE)}
               onPointerUp={stopRepeat} onPointerCancel={stopRepeat} onPointerLeave={stopRepeat}
-              disabled={inconclusivePending}
+              disabled={saveState === 'inconclusive'}
               className={`${BTN_SECONDARY} px-4`}>+</button>
           </div>
         </label>
@@ -615,7 +653,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       <ReasonChips
         value={reason}
         onChange={setReason}
-        disabled={inconclusivePending}
+        disabled={saveState === 'inconclusive'}
         note={note}
         onNoteChange={setNote}
         noteMaxLength={NOTE_MAX}
@@ -625,11 +663,11 @@ function AdjustPage({ itemId }: { itemId: string }) {
       {submitError ? <p className="mb-3 text-sm text-red-700" role="alert">{submitError}</p> : null}
 
       <div className="flex flex-wrap gap-2">
-        {inconclusivePending ? (
-          // R2 P1 / lead Codex round 2: only safe action is a hard
-          // page reload — guarantees a fresh server snapshot of
-          // remainingMeters after any in-flight tx has settled.
-          <button type="button" onClick={() => window.location.reload()} className={BTN_PRIMARY}>Reload page</button>
+        {saveState === 'inconclusive' ? (
+          <>
+            <button type="button" onClick={() => { void onConfirm(); }} disabled={submitting} className={BTN_PRIMARY}>Retry save</button>
+            <button type="button" onClick={() => window.location.reload()} className={BTN_SECONDARY}>Reload page</button>
+          </>
         ) : (
           <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
         )}
