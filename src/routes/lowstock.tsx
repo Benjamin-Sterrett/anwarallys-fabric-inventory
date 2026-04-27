@@ -30,6 +30,7 @@ export default function LowStockRoute() {
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +51,7 @@ export default function LowStockRoute() {
       setTotalCount(raw.length);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [retryToken]);
 
   if (loading) return <Skeleton />;
 
@@ -59,6 +60,11 @@ export default function LowStockRoute() {
       <section className="mx-auto max-w-5xl px-4 py-6">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-700" role="alert">{error}</p>
+          <button
+            type="button"
+            onClick={() => setRetryToken((n) => n + 1)}
+            className={`${BTN_SECONDARY} mt-3`}
+          >Retry</button>
         </div>
       </section>
     );
