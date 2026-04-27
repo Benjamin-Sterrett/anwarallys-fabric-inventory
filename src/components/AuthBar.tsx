@@ -100,7 +100,7 @@ export default function AuthBar() {
     'Signed in';
 
   return (
-    <div className="border-b border-gray-200 bg-gray-50">
+    <div data-auth-bar className="border-b border-gray-200 bg-gray-50">
       <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-between gap-3">
         <p className="text-sm text-gray-700 truncate">
           Signed in as <span className="font-medium text-gray-900">{label}</span>

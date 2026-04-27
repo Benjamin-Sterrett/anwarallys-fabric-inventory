@@ -12,6 +12,8 @@ import DeletedRoute from './deleted';
 import LowStockRoute from './lowstock';
 import NotFoundRoute from './not-found';
 import StaffRoute from './staff';
+import PrintLabelRoute from './print-label';
+import PrintLabelsRoute from './print-labels';
 import { RequireAdmin, RequireAuth } from './RequireAuth';
 
 // Single source of truth for the route tree. Adding a route = add a line here.
@@ -46,6 +48,8 @@ export const router = createBrowserRouter([
       { path: 'deleted', element: <RequireAuth><DeletedRoute /></RequireAuth> },
       { path: 'lowstock', element: <RequireAuth><LowStockRoute /></RequireAuth> },
       { path: 'staff', element: <RequireAdmin><StaffRoute /></RequireAdmin> },
+      { path: 'print/label/:itemId', element: <RequireAuth><PrintLabelRoute /></RequireAuth> },
+      { path: 'print/labels', element: <RequireAuth><PrintLabelsRoute /></RequireAuth> },
       { path: '*', element: <RequireAuth><NotFoundRoute /></RequireAuth> },
     ],
   },

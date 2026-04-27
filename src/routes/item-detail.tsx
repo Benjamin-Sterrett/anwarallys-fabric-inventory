@@ -21,7 +21,7 @@
 // A 1Hz `now` tick re-evaluates the Undo window without re-fetching.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
@@ -125,6 +125,7 @@ function Breadcrumb({ entries }: { entries: BreadcrumbEntry[] }) {
 }
 
 function ItemDetailPage({ itemId }: { itemId: string }) {
+  const navigate = useNavigate();
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
 
@@ -335,6 +336,13 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
       <div className="mb-4 flex flex-wrap gap-2">
         <Link to={`/rolls/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}/edit`} className={BTN_SECONDARY}>Edit metadata</Link>
+        <button
+          type="button"
+          onClick={() => navigate(`/print/label/${item.itemId}?size=default`)}
+          className={BTN_SECONDARY}
+        >
+          Print QR
+        </button>
       </div>
 
       {undoEligible && lastMovement ? (
