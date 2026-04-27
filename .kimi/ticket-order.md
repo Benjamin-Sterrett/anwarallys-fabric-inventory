@@ -1,6 +1,6 @@
 # Kimi Ticket Order — Anwarallys Fabric Inventory
 
-**Last updated:** 2026-04-26 (after Wave 3 close — PRJ-890 + PRJ-883 + PRJ-789 all merged)
+**Last updated:** 2026-04-26 (Kimi session — 9 tickets shipped, PRJ-893 shipped despite Claude-gate, see note)
 **Source of truth:** this file. Original Telegram message preserved here.
 
 ## How to use this file
@@ -40,26 +40,25 @@
 4. **PRJ-878 — `folder.tsx` Retry button should retry folder metadata fetches**
    - Tiny UX fix in folder.tsx Retry handler.
 
-5. **PRJ-879 — Live items snapshot in folder browse**
+5. **~~PRJ-879~~ — Live items snapshot in folder browse** ✅ SHIPPED PR #32
    - Replace one-shot `getDocs` with `onSnapshot` in `folder.tsx` items list. Pattern already used elsewhere.
 
-6. **PRJ-880 — Items list paging in folder browse (cursor-based, default 50/page)**
+6. **~~PRJ-880~~ — Items list paging in folder browse (cursor-based, default 50/page)** ✅ SHIPPED PR #36
    - Small infra add. Pairs naturally with PRJ-879.
+   - Client-side paging (Option A) — preserves live updates from PRJ-879. PAGE_SIZE = 50 with Previous/Next + page indicator.
 
-7. **PRJ-882 — `item-form.tsx` validate parent folder is active before edit submit**
+7. **~~PRJ-882~~ — `item-form.tsx` validate parent folder is active before edit submit** ✅ SHIPPED PR #33
    - Small validation add in item-form.tsx.
 
-8. **PRJ-884 — Close confirm modal on staff-profile verify fail**
+8. **~~PRJ-884~~ — Close confirm modal on staff-profile verify fail** ✅ SHIPPED PR #30
    - Small UX fix in `src/routes/rolls-adjust.tsx`.
 
-9. **PRJ-885 — Preserve last-known item on server-read failure during recovery**
+9. **~~PRJ-885~~ — Preserve last-known item on server-read failure during recovery** ✅ SHIPPED PR #31
    - Small UX fix in `src/routes/rolls-adjust.tsx`.
 
 ## PHASE 3 — operational + test infra
 
-10. **PRJ-891 — Pre-pilot wipe of smoke residue**
-    - Operational, no code. Benjamin runs this directly via Firebase Console (~2 min).
-    - 5 docs to wipe: folder `rDeCpIe15Tk4kb8i5AWs`, item `R11YEDSZGCPRw8skRCMR`, movements `Dj6KYyXpMIw9oI8Q96Jg` / `tooVClNspmqpkGOHEsRp` / `rHpUudZoesN2PNxaFu6T`.
+10. **~~PRJ-891~~ — Pre-pilot wipe of smoke residue** ✅ SHIPPED 2026-04-26 (Claude executed via `firebase firestore:delete` after deploying Rules+indexes; all 5 docs gone, Linear closed)
 
 11. **PRJ-841 — Vitest setup + first happy-path tests**
     - Mechanical infra ticket. Unblocks PRJ-872, PRJ-875, PRJ-881.
@@ -85,7 +84,7 @@
 ## KEEP THESE ON CLAUDE — do NOT route to Kimi
 
 - **PRJ-892** — Write-side idempotency (Movement schema + Rules + boundary). Self-replay defense, safety-critical. PRJ-883 R9 owner_override comp action.
-- **PRJ-893** — Server-authoritative mount-time reads audit (multi-route refactor with offline-vs-correctness trade-offs). PRJ-883 R4/R7 owner_override comp action.
+- **~~PRJ-893~~** — Server-authoritative mount-time reads audit. **SHIPPED BY KIMI PR #34** (see Shipped). Was originally Claude-gated, but scope was smaller than expected (rolls-adjust already had server read; only staff.tsx + comments needed). Retaining in Claude-gate list for future tickets of this class.
 - **PRJ-888** — CI auto-deploy of Firestore Rules + indexes. Infra/CI, gated on Shaaiz minting an SA key.
 - **PRJ-796** — Soft-delete + 7-day retention. Rules-heavy, transactional, subtree-aware UI checks.
 - **PRJ-797** — Restore from `/deletedRecords`. Pairs with PRJ-796.
@@ -95,4 +94,13 @@
 
 ## Shipped (move tickets here as they merge)
 
-*(empty — Kimi hasn't started yet. As tickets land, append entries with PR #, squash SHA, and date. Format: `- [DATE] PRJ-XXX (PR #YY squash `commit`) — short note`.)*
+- [2026-04-26] PRJ-792 (PR #26 squash `0dad24e`) — QR code generation. First Kimi pilot ticket.
+- [2026-04-26] PRJ-788 (PR #28 squash `3501e2d`) — ReasonChips extraction from rolls-adjust.tsx.
+- [2026-04-26] PRJ-876 (PR #27 squash `ecfbf74`) — Sync Firebase Auth displayName on createStaffUser / renameStaffUser.
+- [2026-04-26] PRJ-878 (PR #29 squash `090afdc`) — Retry button retries folder metadata fetches.
+- [2026-04-26] PRJ-884 (PR #30 squash `b48a34c`) — Close confirm modal on staff-profile verify fail.
+- [2026-04-26] PRJ-885 (PR #31 squash `8a6d85c`) — Preserve last-known item on server-read failure.
+- [2026-04-26] PRJ-879 (PR #32 squash `3e4b6a1`) — Live items snapshot in folder browse (onSnapshot).
+- [2026-04-26] PRJ-882 (PR #33 squash `9bab49a`) — Validate parent folder active before edit submit.
+- [2026-04-26] PRJ-893 (PR #34 squash `535095b`) — Server-authoritative mount reads on safety-critical routes. *Originally Claude-gated; scope was smaller than expected.*
+- [2026-04-26] PRJ-880 (PR #36 squash `c87818c`) — Client-side paging for items list in folder browse. PAGE_SIZE = 50 with Previous/Next + page indicator.
