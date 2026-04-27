@@ -107,15 +107,15 @@ function mapErrorCode(code: string, fallback: string): string {
 async function reconcileTimedOutSave(
   itemId: string,
   clientCorrelationId: string,
+  actorUid: string,
 ): Promise<{ kind: 'found'; movement: Movement } | { kind: 'inconclusive' }> {
   for (let attempt = 0; attempt < RECONCILE_MAX_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       await new Promise<void>((resolve) => window.setTimeout(resolve, RECONCILE_RETRY_DELAY_MS));
     }
-    // PRJ-892: direct doc lookup by deterministic movementId (which equals
-    // clientCorrelationId). Write-side idempotency makes read-side actor
-    // scoping unnecessary.
-    const r = await findMovementByCorrelationId(itemId, clientCorrelationId);
+    // PRJ-892: query by correlationId + itemId + actorUid. Actor scoping
+    // prevents read-side leak via correlation-id injection (Codex R2).
+    const r = await findMovementByCorrelationId(itemId, clientCorrelationId, actorUid);
     if (r.ok && r.data !== null) return { kind: 'found', movement: r.data };
     // r.ok && r.data === null  → not yet observed; keep polling.
     // !r.ok                    → probe errored; keep polling.
@@ -392,7 +392,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
     if (!r.ok) {
       // PRJ-892: write-side idempotency handles already-applied directly.
       if (r.error.code === 'already-applied') {
-        const lookup = await findMovementByCorrelationId(item.itemId, correlationId);
+        const lookup = await findMovementByCorrelationId(item.itemId, correlationId, authUser.uid);
         if (lookup.ok && lookup.data) {
           const m = lookup.data;
           setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
@@ -428,7 +428,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       //   a real double-apply window. Confirmed-not-committed semantics
       //   require write-side idempotency; tracked as a follow-up.
       if (r.error.code === 'timeout') {
-        const outcome = await reconcileTimedOutSave(item.itemId, correlationId);
+        const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
         if (outcome.kind === 'found') {
           // Late-success path — restore the 15-sec Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/

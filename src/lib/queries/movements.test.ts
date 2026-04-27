@@ -8,8 +8,13 @@ vi.mock('@/lib/firebase/app', () => ({
 
 const mockDoc = vi.fn();
 const mockRunTransaction = vi.fn();
-const mockGetDocFromServer = vi.fn();
+const mockGetDocsFromServer = vi.fn();
 const mockServerTimestamp = vi.fn(() => 'server-timestamp');
+
+const mockQuery = vi.fn();
+const mockCollection = vi.fn();
+const mockWhere = vi.fn();
+const mockQueryLimit = vi.fn();
 
 vi.mock('firebase/firestore', async () => {
   const actual = await vi.importActual<typeof import('firebase/firestore')>('firebase/firestore');
@@ -17,8 +22,12 @@ vi.mock('firebase/firestore', async () => {
     ...actual,
     doc: (...args: unknown[]) => mockDoc(...args),
     runTransaction: (...args: unknown[]) => mockRunTransaction(...args),
-    getDocFromServer: (...args: unknown[]) => mockGetDocFromServer(...args),
+    getDocsFromServer: (...args: unknown[]) => mockGetDocsFromServer(...args),
     serverTimestamp: () => mockServerTimestamp(),
+    query: (...args: unknown[]) => mockQuery(...args),
+    collection: (...args: unknown[]) => mockCollection(...args),
+    where: (...args: unknown[]) => mockWhere(...args),
+    limit: (...args: unknown[]) => mockQueryLimit(...args),
   };
 });
 
@@ -243,25 +252,20 @@ describe('findMovementByCorrelationId (PRJ-892)', () => {
     vi.clearAllMocks();
   });
 
-  it('returns null when itemId differs', async () => {
+  it('returns null when no matching movement exists', async () => {
     const fakeDb = { type: 'firestore' };
     vi.mocked(getDb).mockReturnValue(fakeDb as unknown as ReturnType<typeof getDb>);
 
-    const correlationId = 'corr-ghi-789';
-    const fakeMovementRef = { id: correlationId, path: `movements/${correlationId}`, withConverter: vi.fn((c) => ({ ...fakeMovementRef, converter: c })) };
-
-    mockDoc.mockReturnValue(fakeMovementRef);
-    mockGetDocFromServer.mockResolvedValue({
-      exists: () => true,
-      data: () => ({
-        movementId: correlationId,
-        itemId: 'different-item-id',
-        oldMeters: 100,
-        newMeters: 80,
-      }),
+    const fakeQuery = { type: 'query' };
+    mockCollection.mockReturnValue({
+      withConverter: () => ({ type: 'collection' }),
+    });
+    mockQuery.mockReturnValue(fakeQuery);
+    mockGetDocsFromServer.mockResolvedValue({
+      docs: [],
     });
 
-    const r = await findMovementByCorrelationId('item-1', correlationId);
+    const r = await findMovementByCorrelationId('item-1', 'corr-ghi-789', 'actor-1');
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.data).toBeNull();

@@ -10,8 +10,8 @@ import { FirebaseError } from 'firebase/app';
 import {
   collection,
   doc,
-  getDocFromServer,
   getDocs,
+  getDocsFromServer,
   limit as queryLimit,
   orderBy,
   query,
@@ -265,7 +265,7 @@ export async function listMovementsForItem(
  * caller's pre-generated `clientCorrelationId`, returns the matching
  * Movement (if it committed) or `null` (if no doc exists yet).
  *
- * Server-only read (R1 P1): uses `getDocFromServer` rather than
+ * Server-only read (R1 P1): uses `getDocsFromServer` rather than
  * `getDocs`. Same reasoning as `getItemByIdFromServer` (PRJ-787 R5):
  * the persistent local cache can hold a pending `/movements` write for
  * several seconds before the server ACKs. A cache-satisfied lookup
@@ -274,14 +274,11 @@ export async function listMovementsForItem(
  * write. Caller MUST handle `firestore/unavailable` (offline / no
  * server reachable) — there is no cache fallback by design.
  *
- * Uses direct doc lookup by `clientCorrelationId`, which now equals the
- * movement doc id (PRJ-892 deterministic doc ID). The defensive `itemId`
- * cross-check is the safety mechanism — if the found movement targets a
- * different item, the lookup returns `null`.
- *
- * Write-side idempotency (PRJ-892) makes read-side actor scoping
- * unnecessary: the transaction rejects reused `clientCorrelationId`
- * values at commit time, so a self-replay is impossible.
+ * The `actorUid` scoping is kept per Codex R2 (PRJ-892): without it, a
+ * read-side leak via correlation-id injection could grant false
+ * late-success on another actor's movement. Write-side idempotency
+ * prevents the double-write, but the reconcile lookup must still verify
+ * ownership before surfacing "Saved" + Undo to the caller.
  *
  * Caller MUST treat a network/index error as inconclusive and fall back
  * to "verify on-hand before retrying" — never auto-success on a query
@@ -299,9 +296,11 @@ export async function listMovementsForItem(
 export async function findMovementByCorrelationId(
   itemId: string,
   clientCorrelationId: string,
+  actorUid: string,
 ): Promise<Result<Movement | null>> {
   if (!isNonEmpty(itemId)) return err('invalid-correlation-id', 'itemId must be a non-empty string.');
   if (!isNonEmpty(clientCorrelationId)) return err('invalid-correlation-id', 'clientCorrelationId must be a non-empty string.');
+  if (!isNonEmpty(actorUid)) return err('invalid-correlation-id', 'actorUid must be a non-empty string.');
 
   let db: Firestore;
   try {
@@ -313,12 +312,15 @@ export async function findMovementByCorrelationId(
   }
 
   try {
-    const movementRef = doc(db, 'movements', clientCorrelationId).withConverter(movementConverter);
-    const snap = await getDocFromServer(movementRef);
-    if (!snap.exists()) return ok(null);
-    const movement = snap.data();
-    if (movement.itemId !== itemId) return ok(null);
-    return ok(movement);
+    const q = query(
+      collection(db, 'movements').withConverter(movementConverter),
+      where('clientCorrelationId', '==', clientCorrelationId),
+      where('itemId', '==', itemId),
+      where('actorUid', '==', actorUid),
+      queryLimit(1),
+    );
+    const docs = (await getDocsFromServer(q)).docs;
+    return ok(docs.length === 0 ? null : (docs[0]?.data() ?? null));
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
