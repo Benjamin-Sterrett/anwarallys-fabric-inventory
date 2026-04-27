@@ -10,8 +10,8 @@ import {
   serverTimestamp, updateDoc, where, type Firestore, type Unsubscribe,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
-import { itemConverter } from '@/lib/firebase/converters';
-import type { RollItem } from '@/lib/models';
+import { deletedRecordConverter, itemConverter } from '@/lib/firebase/converters';
+import type { DeletedRecord, RollItem } from '@/lib/models';
 import { err, ok, type Result } from './result';
 
 const isNonEmpty = (s: unknown): s is string => typeof s === 'string' && s.trim() !== '';
@@ -103,6 +103,28 @@ export async function getItemByIdFromServer(
     const item = snap.data();
     if (!options.includeDeleted && item.deletedAt !== null) return ok(null);
     return ok(item);
+  } catch (e: unknown) {
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/unknown', e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Single deleted-record tombstone by item ID. Returns `null` if the tombstone
+ * is missing (item never deleted, or TTL purged past the 7-day window).
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`, `firestore/unknown`.
+ */
+export async function getDeletedRecordById(itemId: string): Promise<Result<DeletedRecord | null>> {
+  const dbR = resolveDb();
+  if (!dbR.ok) return dbR.result;
+  const { db } = dbR;
+
+  try {
+    const ref = doc(db, 'deletedRecords', itemId).withConverter(deletedRecordConverter);
+    const snap = await getDocFromServer(ref);
+    if (!snap.exists()) return ok(null);
+    return ok(snap.data());
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
