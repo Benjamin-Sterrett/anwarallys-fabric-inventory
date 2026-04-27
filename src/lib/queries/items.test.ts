@@ -1,10 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createItem, updateItem } from './items';
 import { getDb } from '@/lib/firebase/app';
+import { addDoc, updateDoc } from 'firebase/firestore';
 
 vi.mock('@/lib/firebase/app', () => ({
   getDb: vi.fn(),
 }));
+
+vi.mock('firebase/firestore', async () => {
+  const actual = await vi.importActual<typeof import('firebase/firestore')>('firebase/firestore');
+  return {
+    ...actual,
+    addDoc: vi.fn(),
+    updateDoc: vi.fn(),
+    doc: vi.fn(() => ({ withConverter: () => ({}) })),
+    collection: vi.fn(() => ({ withConverter: () => ({}) })),
+    serverTimestamp: vi.fn(() => 'SERVER_TS'),
+  };
+});
 
 const validCreate = {
   folderId: 'folder-1',
@@ -131,6 +144,42 @@ describe('createItem', () => {
       expect(r.error.message).toContain('not configured');
     }
   });
+
+  it('writes the full schema-conformant payload to addDoc', async () => {
+    vi.mocked(getDb).mockReturnValue({} as any);
+    vi.mocked(addDoc).mockResolvedValue({ id: 'new-item-id' } as any);
+
+    const r = await createItem(validCreate);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toEqual({ itemId: 'new-item-id' });
+    }
+    expect(addDoc).toHaveBeenCalledTimes(1);
+
+    const call = vi.mocked(addDoc).mock.calls[0]!;
+    const [, payload] = call;
+    expect(payload).toEqual({
+      itemId: '',
+      sku: 'SKU-123',
+      description: 'Test fabric',
+      folderId: 'folder-1',
+      folderAncestors: ['root', 'folder-1'],
+      remainingMeters: 100,
+      lastMovementId: null,
+      initialMeters: 100,
+      minimumMeters: 10,
+      photoUrl: 'http://example.com/photo.jpg',
+      supplier: 'Supplier A',
+      price: 50,
+      createdAt: 'SERVER_TS',
+      updatedAt: 'SERVER_TS',
+      createdBy: 'user-1',
+      updatedBy: 'user-1',
+      deletedAt: null,
+      deletedBy: null,
+      deleteReason: null,
+    });
+  });
 });
 
 describe('updateItem', () => {
@@ -169,5 +218,60 @@ describe('updateItem', () => {
     if (!r.ok) {
       expect(r.error.code).toBe('firestore/no-db');
     }
+  });
+
+  it('writes ONLY the editable fields to updateDoc', async () => {
+    vi.mocked(getDb).mockReturnValue({} as any);
+    vi.mocked(updateDoc).mockResolvedValue(undefined as any);
+
+    const r = await updateItem(validUpdate);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).toBeUndefined();
+    }
+    expect(updateDoc).toHaveBeenCalledTimes(1);
+
+    const call = vi.mocked(updateDoc).mock.calls[0]!;
+    const [, payload] = call;
+    expect(payload).toEqual({
+      sku: 'SKU-123',
+      description: 'Test fabric',
+      supplier: 'Supplier A',
+      price: 50,
+      minimumMeters: 10,
+      photoUrl: 'http://example.com/photo.jpg',
+      updatedAt: 'SERVER_TS',
+      updatedBy: 'user-1',
+    });
+  });
+
+  it('write payload does NOT contain stock or immutable fields', async () => {
+    vi.mocked(getDb).mockReturnValue({} as any);
+    vi.mocked(updateDoc).mockResolvedValue(undefined as any);
+
+    const r = await updateItem(validUpdate);
+    expect(r.ok).toBe(true);
+
+    const call = vi.mocked(updateDoc).mock.calls[0]!;
+    const [, pload] = call;
+    const forbidden = [
+      'remainingMeters', 'lastMovementId', 'initialMeters',
+      'folderId', 'folderAncestors',
+      'deletedAt', 'deletedBy', 'deleteReason',
+      'createdAt', 'createdBy',
+    ];
+    for (const k of forbidden) expect(pload).not.toHaveProperty(k);
+  });
+
+  it('trims sku before writing', async () => {
+    vi.mocked(getDb).mockReturnValue({} as any);
+    vi.mocked(updateDoc).mockResolvedValue(undefined as any);
+
+    const r = await updateItem({ ...validUpdate, sku: '  SKU-123  ' });
+    expect(r.ok).toBe(true);
+
+    const call = vi.mocked(updateDoc).mock.calls[0]!;
+    const [, pload] = call;
+    expect((pload as unknown as Record<string, unknown>).sku).toBe('SKU-123');
   });
 });
