@@ -301,7 +301,16 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
         <h1 className="text-2xl font-semibold text-gray-900">
           {parentId === null ? 'Home' : currentFolder?.name ?? 'Folder'}
         </h1>
-        {currentError ? <p className="mt-1 text-sm text-red-700">{currentError}</p> : null}
+        {currentError ? (
+          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-700" role="alert">{currentError}</p>
+            <button
+              type="button"
+              onClick={() => setRetryToken((n) => n + 1)}
+              className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700"
+            >Retry</button>
+          </div>
+        ) : null}
       </header>
 
       {canCreate && authUser ? (
@@ -351,7 +360,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
 
       {childrenError ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">{childrenError}</p>
+          <p className="text-sm text-red-700" role="alert">{childrenError}</p>
           <button
             type="button" onClick={() => setRetryToken((n) => n + 1)}
             className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700"
@@ -384,7 +393,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
       {parentId !== null && currentFolder && currentFolder.deletedAt === null ? (
         itemsError ? (
           <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
-            <p className="text-sm text-red-700">{itemsError}</p>
+            <p className="text-sm text-red-700" role="alert">{itemsError}</p>
             <button type="button" onClick={() => setRetryToken((n) => n + 1)}
               className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700">Retry</button>
           </div>

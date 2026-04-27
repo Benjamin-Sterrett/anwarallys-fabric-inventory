@@ -213,7 +213,7 @@ function ItemFormPage(props: ItemFormPageProps) {
     return (
       <section className="mx-auto max-w-2xl px-4 py-8">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">{loadError}</p>
+          <p className="text-sm text-red-700" role="alert">{loadError}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"

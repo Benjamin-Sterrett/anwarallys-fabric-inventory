@@ -162,7 +162,7 @@ export default function LoginRoute() {
               className="mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base"
             />
           </label>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-red-700" role="alert">{error}</p> : null}
           <button
             type="submit"
             disabled={submitting}

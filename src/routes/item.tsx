@@ -281,7 +281,7 @@ export default function ItemRoute() {
     return (
       <section className="mx-auto max-w-2xl px-4 py-8">
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">Missing item id in URL.</p>
+          <p className="text-sm text-red-700" role="alert">Missing item id in URL.</p>
           <Link to="/" className={`${BTN_SECONDARY} mt-3`}>Browse inventory</Link>
         </div>
       </section>

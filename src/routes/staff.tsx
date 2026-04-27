@@ -135,7 +135,7 @@ function AddStaffForm({ adminUid, onAdded }: AddStaffFormProps) {
           />
         </label>
       </div>
-      {error ? <p className="mt-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="mt-3 text-sm text-red-700" role="alert">{error}</p> : null}
       <button
         type="submit"
         disabled={submitting}
@@ -207,7 +207,7 @@ function ActiveStaffRow({ staff, adminUid, onChanged }: ActiveStaffRowProps) {
               className="mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base"
             />
           </label>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="text-sm text-red-700" role="alert">{error}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -236,7 +236,7 @@ function ActiveStaffRow({ staff, adminUid, onChanged }: ActiveStaffRowProps) {
           <div>
             <p className="text-base font-semibold text-gray-900">{staff.displayName}</p>
             <p className="text-sm text-gray-600">{staff.email}</p>
-            {error ? <p className="mt-1 text-sm text-red-700">{error}</p> : null}
+            {error ? <p className="mt-1 text-sm text-red-700" role="alert">{error}</p> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -296,7 +296,7 @@ function InactiveStaffRow({ staff, adminUid, onChanged }: InactiveStaffRowProps)
           <p className="text-base font-semibold text-gray-900">{staff.displayName}</p>
           <p className="text-sm text-gray-600">{staff.email}</p>
           <p className="mt-1 text-xs text-gray-500">Turned off</p>
-          {error ? <p className="mt-1 text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="mt-1 text-sm text-red-700" role="alert">{error}</p> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -402,7 +402,15 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
           {loading ? (
             <p className="mt-2 text-sm text-gray-600">Loading…</p>
           ) : activeError ? (
-            <p className="mt-2 text-sm text-red-700">{activeError}</p>
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-4">
+              <p className="text-sm text-red-700" role="alert">{activeError}</p>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => { void refresh(); }}
+                className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700 disabled:opacity-50"
+              >Retry</button>
+            </div>
           ) : !activeStaff || activeStaff.length === 0 ? (
             <p className="mt-2 text-sm text-gray-600">
               No active staff yet. Add your first staff member above.
@@ -429,7 +437,15 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
           {loading ? (
             <p className="mt-2 text-sm text-gray-600">Loading…</p>
           ) : inactiveError ? (
-            <p className="mt-2 text-sm text-red-700">{inactiveError}</p>
+            <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-4">
+              <p className="text-sm text-red-700" role="alert">{inactiveError}</p>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => { void refresh(); }}
+                className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700 disabled:opacity-50"
+              >Retry</button>
+            </div>
           ) : !inactiveStaff || inactiveStaff.length === 0 ? (
             <p className="mt-2 text-sm text-gray-600">
               No turned-off staff.
