@@ -235,6 +235,34 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
     );
   }, [parentId, authUser, retryToken]);
 
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 when the folder changes.
+  useEffect(() => { setPage(1); }, [parentId]);
+
+  // Clamp page when item count shrinks (e.g. deletions).
+  useEffect(() => {
+    if (items) {
+      const maxPage = Math.ceil(items.length / PAGE_SIZE) || 1;
+      setPage((p) => (p > maxPage ? maxPage : p));
+    }
+  }, [items]);
+
+  const pagedItems = useMemo(() => {
+    if (!items) return undefined;
+    const maxPage = Math.ceil(items.length / PAGE_SIZE) || 1;
+    const effectivePage = Math.min(page, maxPage);
+    const s = (effectivePage - 1) * PAGE_SIZE;
+    return items.slice(s, s + PAGE_SIZE);
+  }, [items, page]);
+
+  const totalItems = items?.length ?? 0;
+  const totalPages = Math.ceil(totalItems / PAGE_SIZE) || 1;
+  const effectivePage = Math.min(page, totalPages);
+  const start = totalItems === 0 ? 0 : (effectivePage - 1) * PAGE_SIZE + 1;
+  const end = Math.min(effectivePage * PAGE_SIZE, totalItems);
+
   const [addOpen, setAddOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -360,11 +388,11 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
             <button type="button" onClick={() => setRetryToken((n) => n + 1)}
               className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700">Retry</button>
           </div>
-        ) : items && items.length > 0 ? (
+        ) : pagedItems && pagedItems.length > 0 ? (
           <div className="mt-6">
             <h2 className="mb-2 text-sm font-medium text-gray-700">Items</h2>
             <ul className="space-y-2">
-              {items.map((it) => (
+              {pagedItems.map((it) => (
                 <li key={it.itemId}>
                   {/* PRJ-789: item rows tap into the detail page (Adjust + history); /edit is reachable via the "Edit metadata" action there. */}
                   <Link to={`/items/${it.itemId}`}
@@ -375,6 +403,27 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
                 </li>
               ))}
             </ul>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                disabled={effectivePage <= 1}
+                onClick={() => setPage(effectivePage - 1)}
+                className={BTN_SECONDARY}
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Showing {start}–{end} of {totalItems}
+              </span>
+              <button
+                type="button"
+                disabled={effectivePage >= totalPages}
+                onClick={() => setPage(effectivePage + 1)}
+                className={BTN_SECONDARY}
+              >
+                Next
+              </button>
+            </div>
           </div>
         ) : null
       ) : null}
