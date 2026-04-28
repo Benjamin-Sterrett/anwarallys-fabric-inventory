@@ -16,6 +16,7 @@ import {
   subscribeToActiveItemsInFolder,
   subscribeToFolderChildren,
 } from '@/lib/queries';
+import LowStockBadge from '@/components/LowStockBadge';
 import type { Folder, RollItem } from '@/lib/models';
 
 const SEARCH_DEPTH_MIN = 4;
@@ -407,7 +408,10 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
                   <Link to={`/items/${it.itemId}`}
                     className="flex min-h-12 items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3 hover:border-gray-300">
                     <span className="text-base font-medium text-gray-900">{it.sku}</span>
-                    <span className="ml-3 text-xs text-gray-600">{it.remainingMeters} m</span>
+                    <span className="ml-3 inline-flex items-center gap-2">
+                      <LowStockBadge remainingMeters={it.remainingMeters} minimumMeters={it.minimumMeters} />
+                      <span className="text-xs text-gray-600">{it.remainingMeters} m</span>
+                    </span>
                   </Link>
                 </li>
               ))}
