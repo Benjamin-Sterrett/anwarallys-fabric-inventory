@@ -125,3 +125,8 @@
 - [2026-04-27] PRJ-908 (PR #52 squash `6a0c867`) — Admin-only Staff nav link in AuthBar. Lead Codex: owner_override at R3 (parser false negative — no explicit VERDICT but clean prose).
 - [2026-04-27] PRJ-906 (PR #53 squash `96705e7`) — Rename /rolls/:id/adjust to /items/:id/adjust + legacy redirect. File renamed rolls-adjust.tsx → item-adjust.tsx. Lead Codex: owner_override (2 P2 findings on debug artifacts, not in PR).
 - [2026-04-27] PRJ-907 (PR #54 squash `e88c7df`) — Fix React 19 state batching race in onUndo: setSnack('Undone.') before setLastMovement(null). Lead Codex: owner_override (4th consecutive PR with no explicit VERDICT line — known tooling issue).
+- [2026-04-28] PRJ-910 (PR #55 squash `e67c663`) — Deactivated user bounce guard. Rules relaxed + AuthBar subscription + tests. Codex: REQUEST_CHANGES R1/R2/R3/R4, merged with owner_override at R4 (P2 finding out-of-scope; follow-up PRJ-918 filed). Rules deployed pre-merge.
+
+## Polish Bundle Queue (post-PRJ-904)
+Order: PRJ-914 → PRJ-916 → PRJ-917 → PRJ-913 → PRJ-915 → PRJ-911 → PRJ-912
+Update this list after each polish ticket ships.
