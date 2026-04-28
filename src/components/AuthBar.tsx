@@ -53,12 +53,17 @@ export default function AuthBar() {
     return unsub;
   }, []);
 
+  // Reset deactivation flag when the user changes so a new sign-in starts
+  // fresh and the toast doesn't flash for a different user.
+  useEffect(() => {
+    setDeactivated(false);
+  }, [authUser?.uid]);
+
   // Subscribe to the canonical /users/{uid} doc for displayName AND
   // deactivation state. The subscription lives for the lifetime of the
   // signed-in session; an admin flipping `isActive` mid-task fires here
   // within one snapshot round-trip.
   useEffect(() => {
-    if (deactivated) return; // one-shot: once flagged, stay flagged
     if (!authUser) {
       setFirestoreDisplayName(null);
       return;
@@ -68,7 +73,14 @@ export default function AuthBar() {
       (user) => {
         if (user && user.isActive === false) {
           setDeactivated(true);
-          void signOut();
+          // Preserve admin recovery path: an inactive admin can still reach
+          // /staff to reactivate themselves (PRJ-874). Only non-admins are
+          // bounced automatically.
+          const isAdmin =
+            isAdminEmail(authUser.email ?? '') && authUser.emailVerified;
+          if (!isAdmin) {
+            void signOut();
+          }
           return;
         }
         if (user && user.displayName.trim()) {
@@ -85,7 +97,7 @@ export default function AuthBar() {
       },
     );
     return unsub;
-  }, [authUser, deactivated]);
+  }, [authUser]);
 
   const handleSignOut = useCallback(async () => {
     // eslint-disable-next-line no-alert -- v1: simple confirm matches /staff page pattern.

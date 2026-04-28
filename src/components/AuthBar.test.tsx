@@ -193,5 +193,62 @@ describe('AuthBar', () => {
       await screen.findByText(/Signed in as/);
       expect(mockSignOut).not.toHaveBeenCalled();
     });
+
+    it('does NOT call signOut for deactivated admin (recovery path)', async () => {
+      vi.mocked(isAdminEmail).mockReturnValue(true);
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser({ email: 'admin@fabric.local', emailVerified: true }));
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext({
+          uid: 'uid-1',
+          email: 'admin@fabric.local',
+          displayName: 'Admin User',
+          isActive: false,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Your account has been turned off\. Contact your store admin to be reactivated\./),
+        ).toBeInTheDocument();
+      });
+      expect(mockSignOut).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call signOut for deactivated admin with unverified email', async () => {
+      vi.mocked(isAdminEmail).mockReturnValue(true);
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser({ email: 'admin@fabric.local', emailVerified: false }));
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext({
+          uid: 'uid-1',
+          email: 'admin@fabric.local',
+          displayName: 'Admin User',
+          isActive: false,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(mockSignOut).toHaveBeenCalledTimes(1);
+      });
+    });
   });
 });
