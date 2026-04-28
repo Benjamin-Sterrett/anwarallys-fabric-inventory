@@ -188,13 +188,11 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   // Ancestor chips. Per-doc failure → fall back to short ID prefix so
   // the path stays clickable.
   const [ancestorEntries, setAncestorEntries] = useState<BreadcrumbEntry[]>([]);
-  const [ancestorsLoading, setAncestorsLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    if (!currentFolder) { setAncestorEntries([]); setAncestorsLoading(false); return; }
+    if (!currentFolder) { setAncestorEntries([]); return; }
     const ids = currentFolder.ancestors;
-    if (ids.length === 0) { setAncestorEntries([]); setAncestorsLoading(false); return; }
-    setAncestorsLoading(true);
+    if (ids.length === 0) { setAncestorEntries([]); return; }
     void Promise.all(ids.map((id) => getFolderById(id))).then((results) => {
       if (cancelled) return;
       setAncestorEntries(results.map((r, i) => {
@@ -203,7 +201,6 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
           ? { folderId: id, name: r.data.name }
           : { folderId: id, name: `…${id.slice(-4)}` };
       }));
-      setAncestorsLoading(false);
     });
     return () => { cancelled = true; };
   }, [currentFolder, retryToken]);
@@ -302,9 +299,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const isLoading =
     authUser === undefined ||
     currentFolder === undefined ||
-    children === undefined ||
-    items === undefined ||
-    ancestorsLoading;
+    children === undefined;
 
   if (isLoading) {
     return <Skeleton />;
@@ -406,6 +401,15 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
             <p className="text-sm text-red-700" role="alert">{itemsError}</p>
             <button type="button" onClick={() => setRetryToken((n) => n + 1)}
               className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700">Retry</button>
+          </div>
+        ) : items === undefined ? (
+          <div className="mt-6">
+            <h2 className="mb-2 text-sm font-medium text-gray-700">Items</h2>
+            <ul className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <li key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+              ))}
+            </ul>
           </div>
         ) : pagedItems && pagedItems.length > 0 ? (
           <div className="mt-6">
