@@ -34,6 +34,9 @@ import {
 } from '@/lib/queries';
 import type { Movement, RollItem } from '@/lib/models';
 import RollLabel from '@/components/RollLabel';
+import { Breadcrumbs } from '@/components/Breadcrumbs';
+
+interface BreadcrumbEntry { folderId: string; name: string | null; }
 
 const UNDO_WINDOW_MS = 15_000;
 const HISTORY_PAGE_SIZE = 50;
@@ -100,28 +103,6 @@ function mapErrorCode(code: string, fallback: string): string {
     case 'firestore/aborted': return 'Another save happened first. Refresh and retry.';
     default: return `${fallback} (${code})`;
   }
-}
-
-interface BreadcrumbEntry { folderId: string; name: string | null; }
-
-function Breadcrumb({ entries }: { entries: BreadcrumbEntry[] }) {
-  return (
-    <nav aria-label="Folder path" className="text-sm text-gray-700">
-      {entries.map((entry, index) => {
-        const isLast = index === entries.length - 1;
-        const label = entry.name ?? 'Home';
-        const to = entry.folderId === '' ? '/' : `/folders/${entry.folderId}`;
-        return (
-          <span key={`${entry.folderId}-${index}`}>
-            {isLast
-              ? <span className="font-medium text-gray-900">{label}</span>
-              : <Link to={to} className="text-gray-700 underline-offset-2 hover:underline">{label}</Link>}
-            {isLast ? null : <span className="mx-2 text-gray-400">/</span>}
-          </span>
-        );
-      })}
-    </nav>
-  );
 }
 
 function ItemDetailPage({ itemId }: { itemId: string }) {
@@ -293,7 +274,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
-      <Breadcrumb entries={breadcrumbEntries} />
+      <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
 
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">{item.sku}</h1>

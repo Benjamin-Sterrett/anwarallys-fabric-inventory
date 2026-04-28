@@ -5,6 +5,9 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { getFolderById, getItemById, getItemByIdFromServer } from '@/lib/queries';
 import type { RollItem } from '@/lib/models';
 import RollLabel from '@/components/RollLabel';
+import { Breadcrumbs } from '@/components/Breadcrumbs';
+
+interface BreadcrumbEntry { folderId: string; name: string | null; }
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
 const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
@@ -14,28 +17,6 @@ const round2dp = (n: number): number => Math.round(n * 100) / 100;
 function formatMeters(n: number): string {
   if (!Number.isFinite(n)) return '–';
   return `${round2dp(n)} m`;
-}
-
-interface BreadcrumbEntry { folderId: string; name: string | null; }
-
-function Breadcrumb({ entries }: { entries: BreadcrumbEntry[] }) {
-  return (
-    <nav aria-label="Folder path" className="text-sm text-gray-700">
-      {entries.map((entry, index) => {
-        const isLast = index === entries.length - 1;
-        const label = entry.name ?? 'Home';
-        const to = entry.folderId === '' ? '/' : `/folders/${entry.folderId}`;
-        return (
-          <span key={`${entry.folderId}-${index}`}>
-            {isLast
-              ? <span className="font-medium text-gray-900">{label}</span>
-              : <Link to={to} className="text-gray-700 underline-offset-2 hover:underline">{label}</Link>}
-            {isLast ? null : <span className="mx-2 text-gray-400">/</span>}
-          </span>
-        );
-      })}
-    </nav>
-  );
 }
 
 function Skeleton({ itemId }: { itemId: string }) {
@@ -219,7 +200,7 @@ function ItemPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
-      <Breadcrumb entries={breadcrumbEntries} />
+      <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
 
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">{item.sku}</h1>
