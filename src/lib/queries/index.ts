@@ -27,6 +27,8 @@ export {
 export {
   softDeleteItem,
   softDeleteFolder,
+  restoreItem,
+  restoreFolder,
   getFolderSubtreeIsEmpty,
   subscribeToDeletedItems,
   subscribeToDeletedFolders,

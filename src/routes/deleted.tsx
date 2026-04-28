@@ -1,11 +1,16 @@
-// Recently deleted view (PRJ-796). Lists soft-deleted items and folders
-// within the 7-day retention window. Restore is disabled until PRJ-797.
+// Recently deleted view (PRJ-796 + PRJ-797). Lists soft-deleted items and folders
+// within the 7-day retention window and allows restore.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToDeletedItems, subscribeToDeletedFolders } from '@/lib/queries';
+import {
+  subscribeToDeletedItems,
+  subscribeToDeletedFolders,
+  restoreItem,
+  restoreFolder,
+} from '@/lib/queries';
 import type { RollItem, Folder } from '@/lib/models';
 
 function formatRelative(ts: Timestamp): string {
@@ -21,7 +26,71 @@ function formatRelative(ts: Timestamp): string {
   return `${day}d ago`;
 }
 
-function DeletedItemsSection({ items }: { items: RollItem[] }) {
+interface RestoreModalState {
+  type: 'item' | 'folder';
+  id: string;
+  name: string;
+}
+
+function RestoreConfirmModal({
+  state,
+  onConfirm,
+  onCancel,
+  error,
+  loading,
+}: {
+  state: RestoreModalState;
+  onConfirm: () => void;
+  onCancel: () => void;
+  error: string | null;
+  loading: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-900">
+          Restore {state.type === 'item' ? 'item' : 'folder'}?
+        </h3>
+        <p className="mt-2 text-sm text-gray-600">
+          “{state.name}” will appear in its previous location again.
+        </p>
+        {error ? (
+          <p className="mt-3 text-sm text-red-700" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={loading}
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading ? 'Restoring…' : 'Restore'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeletedItemsSection({
+  items,
+  onRestore,
+  canRestore,
+}: {
+  items: RollItem[];
+  onRestore: (item: RollItem) => void;
+  canRestore: (item: RollItem) => boolean;
+}) {
   if (items.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center">
@@ -43,11 +112,12 @@ function DeletedItemsSection({ items }: { items: RollItem[] }) {
             </div>
             <button
               type="button"
-              disabled
-              title="Available in PRJ-797"
-              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-400 disabled:opacity-50"
+              onClick={() => onRestore(item)}
+              disabled={!canRestore(item)}
+              title={canRestore(item) ? undefined : 'Restore window has expired'}
+              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Restore
+              {canRestore(item) ? 'Restore' : 'Expired'}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
@@ -71,7 +141,15 @@ function DeletedItemsSection({ items }: { items: RollItem[] }) {
   );
 }
 
-function DeletedFoldersSection({ folders }: { folders: Folder[] }) {
+function DeletedFoldersSection({
+  folders,
+  onRestore,
+  canRestore,
+}: {
+  folders: Folder[];
+  onRestore: (folder: Folder) => void;
+  canRestore: (folder: Folder) => boolean;
+}) {
   if (folders.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center">
@@ -93,11 +171,12 @@ function DeletedFoldersSection({ folders }: { folders: Folder[] }) {
             </div>
             <button
               type="button"
-              disabled
-              title="Available in PRJ-797"
-              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-400 disabled:opacity-50"
+              onClick={() => onRestore(folder)}
+              disabled={!canRestore(folder)}
+              title={canRestore(folder) ? undefined : 'Restore window has expired'}
+              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Restore
+              {canRestore(folder) ? 'Restore' : 'Expired'}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
@@ -149,16 +228,72 @@ export default function DeletedRoute() {
     return () => clearInterval(id);
   }, []);
 
-  // Retention window matches the tombstone's expireAt: 7 days + 5-minute
-  // safety buffer (PRJ-805). Using deletedAt + 7d alone would hide items
-  // during the final 5 minutes when the tombstone is still restorable.
   const RETENTION_MS = 7 * 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
+  const RESTORE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
   const filteredItems = useMemo(() =>
     items?.filter(item => item.deletedAt instanceof Timestamp && item.deletedAt.toMillis() >= now - RETENTION_MS) ?? [],
   [items, now]);
   const filteredFolders = useMemo(() =>
     folders?.filter(folder => folder.deletedAt instanceof Timestamp && folder.deletedAt.toMillis() >= now - RETENTION_MS) ?? [],
   [folders, now]);
+  const canRestoreItem = (item: RollItem) =>
+    item.deletedAt instanceof Timestamp && item.deletedAt.toMillis() >= now - RESTORE_WINDOW_MS;
+  const canRestoreFolder = (folder: Folder) =>
+    folder.deletedAt instanceof Timestamp && folder.deletedAt.toMillis() >= now - RESTORE_WINDOW_MS;
+
+  const [restoreModal, setRestoreModal] = useState<RestoreModalState | null>(null);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [itemRestoreSuccess, setItemRestoreSuccess] = useState<string | null>(null);
+  const [folderRestoreSuccess, setFolderRestoreSuccess] = useState<string | null>(null);
+
+  const openItemRestore = (item: RollItem) => {
+    if (!canRestoreItem(item)) {
+      setRestoreError('Restore window has expired.');
+      return;
+    }
+    setRestoreError(null);
+    setRestoreModal({ type: 'item', id: item.itemId, name: item.sku });
+  };
+
+  const openFolderRestore = (folder: Folder) => {
+    if (!canRestoreFolder(folder)) {
+      setRestoreError('Restore window has expired.');
+      return;
+    }
+    setRestoreError(null);
+    setRestoreModal({ type: 'folder', id: folder.folderId, name: folder.name });
+  };
+
+  const confirmRestore = async () => {
+    if (!restoreModal || !authUser) return;
+    setRestoreLoading(true);
+    setRestoreError(null);
+
+    if (restoreModal.type === 'item') {
+      const result = await restoreItem(restoreModal.id, authUser.uid);
+      setRestoreLoading(false);
+      if (result.ok) {
+        setItemRestoreSuccess(`Restored “${restoreModal.name}”.`);
+        setItems((prev) => prev?.filter((i) => i.itemId !== restoreModal.id));
+        setRestoreModal(null);
+        setTimeout(() => setItemRestoreSuccess(null), 3000);
+      } else {
+        setRestoreError(result.error.message);
+      }
+    } else {
+      const result = await restoreFolder(restoreModal.id, authUser.uid);
+      setRestoreLoading(false);
+      if (result.ok) {
+        setFolderRestoreSuccess(`Restored folder “${restoreModal.name}”.`);
+        setFolders((prev) => prev?.filter((f) => f.folderId !== restoreModal.id));
+        setRestoreModal(null);
+        setTimeout(() => setFolderRestoreSuccess(null), 3000);
+      } else {
+        setRestoreError(result.error.message);
+      }
+    }
+  };
 
   const loading = authUser === undefined || (authUser !== null && (items === undefined || folders === undefined));
   if (loading) {
@@ -190,6 +325,12 @@ export default function DeletedRoute() {
       <h1 className="text-2xl font-semibold text-gray-900">Recently deleted</h1>
       <p className="mt-1 text-sm text-gray-600">Items and folders deleted in the last 7 days.</p>
 
+      {itemRestoreSuccess ? (
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3">
+          <p className="text-sm text-green-800" role="status">{itemRestoreSuccess}</p>
+        </div>
+      ) : null}
+
       <div className="mt-6">
         <h2 className="mb-2 text-sm font-medium text-gray-700">Deleted items</h2>
         {itemsError ? (
@@ -197,9 +338,15 @@ export default function DeletedRoute() {
             <p className="text-sm text-red-700" role="alert">Could not load deleted items: {itemsError}</p>
           </div>
         ) : (
-          <DeletedItemsSection items={filteredItems} />
+          <DeletedItemsSection items={filteredItems} onRestore={openItemRestore} canRestore={canRestoreItem} />
         )}
       </div>
+
+      {folderRestoreSuccess ? (
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3">
+          <p className="text-sm text-green-800" role="status">{folderRestoreSuccess}</p>
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <h2 className="mb-2 text-sm font-medium text-gray-700">Deleted folders</h2>
@@ -208,9 +355,19 @@ export default function DeletedRoute() {
             <p className="text-sm text-red-700" role="alert">Could not load deleted folders: {foldersError}</p>
           </div>
         ) : (
-          <DeletedFoldersSection folders={filteredFolders} />
+          <DeletedFoldersSection folders={filteredFolders} onRestore={openFolderRestore} canRestore={canRestoreFolder} />
         )}
       </div>
+
+      {restoreModal ? (
+        <RestoreConfirmModal
+          state={restoreModal}
+          onConfirm={confirmRestore}
+          onCancel={() => setRestoreModal(null)}
+          error={restoreError}
+          loading={restoreLoading}
+        />
+      ) : null}
     </section>
   );
 }
