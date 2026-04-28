@@ -6,13 +6,15 @@
 // same-device creates instantly (no optimistic UI). ESL + mobile-first.
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import {
   countActiveItemsInSubtree,
   createFolder,
   getFolderById,
+  getFolderSubtreeIsEmpty,
+  softDeleteFolder,
   subscribeToActiveItemsInFolder,
   subscribeToFolderChildren,
 } from '@/lib/queries';
@@ -155,6 +157,7 @@ function Skeleton() {
   );
 }
 export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
+  const navigate = useNavigate();
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
 
@@ -276,6 +279,58 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const [addOpen, setAddOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // PRJ-796: subtree emptiness check for folder delete.
+  const [subtreeCheck, setSubtreeCheck] = useState<{ empty: boolean; itemCount: number; folderCount: number } | undefined>(undefined);
+  useEffect(() => {
+    if (authUser === undefined || parentId === null) { setSubtreeCheck(undefined); return; }
+    let cancelled = false;
+    setSubtreeCheck(undefined);
+    void getFolderSubtreeIsEmpty(parentId).then((r) => {
+      if (cancelled) return;
+      if (r.ok) setSubtreeCheck(r.data);
+      else setSubtreeCheck(undefined);
+    });
+    return () => { cancelled = true; };
+  }, [authUser, parentId, retryToken, items, children]);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  const onDeleteFolder = async () => {
+    if (!parentId || !authUser || !currentFolder) return;
+
+    // Re-verify emptiness immediately before deleting. This is a UI-only
+    // guard — Firestore client transactions cannot query collection counts,
+    // so two staff acting concurrently could both pass this check before
+    // either delete commits. That leaves active descendants under a deleted
+    // parent (orphan corruption). This is an accepted v1 limitation per
+    // PRJ-796: Rules cannot iterate folderAncestors[] and the audit log
+    // (not Rules) is the recovery surface for staff self-corruption.
+    const check = await getFolderSubtreeIsEmpty(parentId);
+    if (!check.ok) {
+      setDeleteError(`Could not verify folder contents: ${check.error.message}`);
+      return;
+    }
+    if (!check.data.empty) {
+      setDeleteError(`Cannot delete: folder contains ${check.data.itemCount} item(s) and ${check.data.folderCount} subfolder(s). Delete or move them first.`);
+      setSubtreeCheck(check.data); // Update UI to reflect current state
+      return;
+    }
+
+    setDeleteSubmitting(true);
+    setDeleteError(null);
+    const result = await softDeleteFolder(parentId, deleteReason, authUser.uid);
+    setDeleteSubmitting(false);
+    if (result.ok) {
+      setDeleteOpen(false);
+      navigate(currentFolder.parentId ? `/folders/${currentFolder.parentId}` : '/');
+    } else {
+      setDeleteError(result.error.message);
+    }
+  };
+
   const currentDepth = parentId === null ? 0 : currentFolder?.depth ?? 0;
   const showSearch = currentDepth >= SEARCH_DEPTH_MIN;
 
@@ -353,8 +408,68 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
                 Add item
               </Link>
             ) : null}
+            {/* PRJ-796: folder delete — only for non-root, signed-in users. */}
+            {parentId !== null && authUser && currentFolder && currentFolder.deletedAt === null ? (
+              subtreeCheck === undefined ? (
+                <span className="inline-flex min-h-12 items-center justify-center rounded-md border border-gray-200 px-5 py-3 text-sm font-medium text-gray-400">
+                  Checking contents…
+                </span>
+              ) : !subtreeCheck.empty ? (
+                <span className="inline-flex min-h-12 items-center justify-center rounded-md border border-gray-200 px-5 py-3 text-sm font-medium text-gray-500">
+                  Cannot delete: folder contains {subtreeCheck.itemCount} items and {subtreeCheck.folderCount} subfolders. Delete or move them first.
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
+                  className={`${BTN_SECONDARY} text-red-700 border-red-300`}
+                >
+                  Delete folder
+                </button>
+              )
+            ) : null}
           </div>
         )
+      ) : null}
+
+      {deleteOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <h2 className="text-base font-semibold text-gray-900">Delete this folder?</h2>
+            <p className="mt-1 text-sm text-gray-700">
+              You have 7 days to restore from Recently deleted.
+            </p>
+            <label className="mt-3 block">
+              <span className="text-sm font-medium text-gray-800">Reason for deletion (optional)</span>
+              <textarea
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                maxLength={100}
+                rows={2}
+                className="mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base"
+              />
+            </label>
+            {deleteError ? <p className="mt-2 text-sm text-red-700" role="alert">{deleteError}</p> : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => { void onDeleteFolder(); }}
+                disabled={deleteSubmitting}
+                className={`${BTN_PRIMARY} bg-red-700`}
+              >
+                {deleteSubmitting ? 'Deleting…' : 'Delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeleteOpen(false); setDeleteError(null); }}
+                disabled={deleteSubmitting}
+                className={BTN_SECONDARY}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {showSearch ? (

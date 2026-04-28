@@ -38,6 +38,7 @@ export const folderConverter: FirestoreDataConverter<Folder> = {
       updatedBy: d.updatedBy,
       deletedAt: d.deletedAt ?? null,
       deletedBy: d.deletedBy ?? null,
+      deleteReason: d.deleteReason ?? null,
     };
   },
 };

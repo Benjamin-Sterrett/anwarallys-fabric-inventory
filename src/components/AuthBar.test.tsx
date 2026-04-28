@@ -215,6 +215,20 @@ describe('AuthBar', () => {
     expect(link).toHaveAttribute('href', '/change-password');
   });
 
+  it('renders Recently deleted link for signed-in users', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser());
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((_onNext) => vi.fn());
+
+    renderWithRouter();
+
+    const link = await screen.findByRole('link', { name: /recently deleted/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/deleted');
+  });
+
   it('does not render Change password link when signed out', async () => {
     vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
       cb(null);

@@ -25,6 +25,13 @@ export {
   type MovementsPage,
 } from './movements';
 export {
+  softDeleteItem,
+  softDeleteFolder,
+  getFolderSubtreeIsEmpty,
+  subscribeToDeletedItems,
+  subscribeToDeletedFolders,
+} from './deleted';
+export {
   listActiveStaff,
   listActiveStaffFromServer,
   listInactiveStaff,
