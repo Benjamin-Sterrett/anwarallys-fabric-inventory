@@ -65,9 +65,24 @@ SEVERITY|FILE:LINE|ISSUE|RECOMMENDATION
 
 Severity levels: CRITICAL, HIGH, MEDIUM, LOW
 
-End with one of:
-- `APPROVE` — no blocking issues
-- `REQUEST_CHANGES` — has CRITICAL or HIGH findings
+You MUST end your review with exactly one line in this format:
+```
+VERDICT: APPROVE
+```
+or
+```
+VERDICT: REQUEST_CHANGES
+```
+or
+```
+VERDICT: BLOCKED
+```
+
+Use `VERDICT: APPROVE` when there are no blocking issues.  
+Use `VERDICT: REQUEST_CHANGES` when there are CRITICAL or HIGH findings that must be fixed.  
+Use `VERDICT: BLOCKED` only when you cannot complete the review (e.g., missing context, build failures).
+
+Do not omit the VERDICT line. Do not add prose after the VERDICT line.
 
 ## Rules
 
