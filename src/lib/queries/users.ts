@@ -538,3 +538,41 @@ export async function deactivateStaffUser(
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
   }
 }
+
+/**
+ * Live subscription to ALL user docs (active + inactive). Used by the
+ * /deleted view to resolve deletedBy uid → displayName (PRJ-923).
+ * Non-admin staff will receive permission-denied; callers should handle
+ * gracefully and fall back to raw uids.
+ * Returns an SDK `Unsubscribe`; caller MUST invoke on cleanup.
+ */
+export function subscribeToAllUsers(
+  onNext: (users: User[]) => void,
+  onError: (error: { code: string; message: string }) => void,
+): Unsubscribe {
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) {
+      queueMicrotask(() =>
+        onError({ code: 'firestore/no-db', message: 'Firebase is not configured.' }),
+      );
+      return () => undefined;
+    }
+    db = maybeDb;
+  } catch (e: unknown) {
+    queueMicrotask(() =>
+      onError({
+        code: 'firestore/init-failed',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return () => undefined;
+  }
+
+  const q = query(collection(db, 'users').withConverter(userConverter));
+  return onSnapshot(q, {
+    next: (snap) => onNext(snap.docs.map((d) => d.data())),
+    error: (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
+  });
+}

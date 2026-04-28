@@ -1,5 +1,5 @@
-// Recently deleted view (PRJ-796 + PRJ-797). Lists soft-deleted items and folders
-// within the 7-day retention window and allows restore.
+// Recently deleted view (PRJ-796 + PRJ-797 + PRJ-923). Lists soft-deleted
+// items and folders within the 7-day retention window and allows restore.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -8,10 +8,12 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import {
   subscribeToDeletedItems,
   subscribeToDeletedFolders,
+  subscribeToAllUsers,
+  subscribeToAllFolders,
   restoreItem,
   restoreFolder,
 } from '@/lib/queries';
-import type { RollItem, Folder } from '@/lib/models';
+import type { RollItem, Folder, User } from '@/lib/models';
 
 function formatRelative(ts: Timestamp): string {
   const ms = ts.toMillis();
@@ -24,6 +26,16 @@ function formatRelative(ts: Timestamp): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.round(hr / 24);
   return `${day}d ago`;
+}
+
+function buildBreadcrumb(
+  ancestorIds: string[],
+  folderNameMap: Map<string, string>,
+): string {
+  if (ancestorIds.length === 0) return 'Home';
+  return ancestorIds
+    .map((id) => folderNameMap.get(id) || `…${id.slice(-4)}`)
+    .join(' > ');
 }
 
 interface RestoreModalState {
@@ -86,10 +98,14 @@ function DeletedItemsSection({
   items,
   onRestore,
   canRestore,
+  displayNameMap,
+  folderNameMap,
 }: {
   items: RollItem[];
   onRestore: (item: RollItem) => void;
   canRestore: (item: RollItem) => boolean;
+  displayNameMap: Map<string, string>;
+  folderNameMap: Map<string, string>;
 }) {
   if (items.length === 0) {
     return (
@@ -121,19 +137,23 @@ function DeletedItemsSection({
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-            <span>
-              {item.folderAncestors.length > 0
-                ? `…${item.folderAncestors[item.folderAncestors.length - 1]?.slice(-4) ?? ''}`
-                : 'Home'}
+            <span className="truncate max-w-[200px]">
+              {buildBreadcrumb(item.folderAncestors, folderNameMap)}
             </span>
             <span aria-hidden className="text-gray-300">·</span>
-            <span>{item.deletedBy ?? '—'}</span>
+            <span>{displayNameMap.get(item.deletedBy || '') || item.deletedBy || '—'}</span>
             <span aria-hidden className="text-gray-300">·</span>
             {item.deletedAt instanceof Timestamp ? (
               <span title={item.deletedAt.toDate().toLocaleString()}>{formatRelative(item.deletedAt)}</span>
             ) : (
               <span>—</span>
             )}
+            {item.deleteReason ? (
+              <>
+                <span aria-hidden className="text-gray-300">·</span>
+                <span className="text-amber-700">{item.deleteReason}</span>
+              </>
+            ) : null}
           </div>
         </li>
       ))}
@@ -145,10 +165,14 @@ function DeletedFoldersSection({
   folders,
   onRestore,
   canRestore,
+  displayNameMap,
+  folderNameMap,
 }: {
   folders: Folder[];
   onRestore: (folder: Folder) => void;
   canRestore: (folder: Folder) => boolean;
+  displayNameMap: Map<string, string>;
+  folderNameMap: Map<string, string>;
 }) {
   if (folders.length === 0) {
     return (
@@ -166,7 +190,9 @@ function DeletedFoldersSection({
             <div className="min-w-0">
               <p className="text-sm font-medium text-gray-900">{folder.name}</p>
               <p className="mt-0.5 text-xs text-gray-600">
-                {folder.parentId === null ? 'Root' : `Parent: …${folder.parentId.slice(-4)}`}
+                {folder.parentId === null
+                  ? 'Root'
+                  : `Parent: ${buildBreadcrumb(folder.ancestors.concat(folder.parentId), folderNameMap)}`}
               </p>
             </div>
             <button
@@ -180,13 +206,19 @@ function DeletedFoldersSection({
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
-            <span>{folder.deletedBy ?? '—'}</span>
+            <span>{displayNameMap.get(folder.deletedBy || '') || folder.deletedBy || '—'}</span>
             <span aria-hidden className="text-gray-300">·</span>
             {folder.deletedAt instanceof Timestamp ? (
               <span title={folder.deletedAt.toDate().toLocaleString()}>{formatRelative(folder.deletedAt)}</span>
             ) : (
               <span>—</span>
             )}
+            {folder.deleteReason ? (
+              <>
+                <span aria-hidden className="text-gray-300">·</span>
+                <span className="text-amber-700">{folder.deleteReason}</span>
+              </>
+            ) : null}
           </div>
         </li>
       ))}
@@ -221,6 +253,44 @@ export default function DeletedRoute() {
       (e) => { setFolders([]); setFoldersError(`${e.message} (${e.code})`); },
     );
   }, [authUser]);
+
+  const [users, setUsers] = useState<User[] | undefined>(undefined);
+  useEffect(() => {
+    if (authUser === undefined) return;
+    return subscribeToAllUsers(
+      (next) => setUsers(next),
+      () => setUsers([]),
+    );
+  }, [authUser]);
+
+  const [allFolders, setAllFolders] = useState<Folder[] | undefined>(undefined);
+  useEffect(() => {
+    if (authUser === undefined) return;
+    return subscribeToAllFolders(
+      (next) => setAllFolders(next),
+      () => setAllFolders([]),
+    );
+  }, [authUser]);
+
+  const displayNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (users) {
+      for (const u of users) {
+        map.set(u.uid, u.displayName);
+      }
+    }
+    return map;
+  }, [users]);
+
+  const folderNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (allFolders) {
+      for (const f of allFolders) {
+        map.set(f.folderId, f.name);
+      }
+    }
+    return map;
+  }, [allFolders]);
 
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -338,7 +408,13 @@ export default function DeletedRoute() {
             <p className="text-sm text-red-700" role="alert">Could not load deleted items: {itemsError}</p>
           </div>
         ) : (
-          <DeletedItemsSection items={filteredItems} onRestore={openItemRestore} canRestore={canRestoreItem} />
+          <DeletedItemsSection
+            items={filteredItems}
+            onRestore={openItemRestore}
+            canRestore={canRestoreItem}
+            displayNameMap={displayNameMap}
+            folderNameMap={folderNameMap}
+          />
         )}
       </div>
 
@@ -355,7 +431,13 @@ export default function DeletedRoute() {
             <p className="text-sm text-red-700" role="alert">Could not load deleted folders: {foldersError}</p>
           </div>
         ) : (
-          <DeletedFoldersSection folders={filteredFolders} onRestore={openFolderRestore} canRestore={canRestoreFolder} />
+          <DeletedFoldersSection
+            folders={filteredFolders}
+            onRestore={openFolderRestore}
+            canRestore={canRestoreFolder}
+            displayNameMap={displayNameMap}
+            folderNameMap={folderNameMap}
+          />
         )}
       </div>
 
