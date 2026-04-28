@@ -78,6 +78,7 @@ export interface Folder {
   /** Server-stamped on soft-delete by Rules (PRJ-805). */
   deletedAt: ServerTimestamp | null;
   deletedBy: string | null;
+  deleteReason: string | null;
 }
 
 export interface RollItem {

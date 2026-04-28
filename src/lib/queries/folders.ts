@@ -201,6 +201,7 @@ export async function createFolder(
         // PRJ-865: explicit null required (rules' hasAll guard).
         deletedAt: null,
         deletedBy: null,
+        deleteReason: null,
       },
     );
     return ok({ folderId: ref.id });

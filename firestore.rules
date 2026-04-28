@@ -104,9 +104,10 @@ service cloud.firestore {
         // omitted field reads as `null`, so `field == null` alone passes
         // for docs created without the key. Such docs are then invisible
         // to `where('deletedAt','==',null)` queries (silent ghost rows).
-        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy'])
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy', 'deleteReason'])
         && request.resource.data.deletedAt == null
         && request.resource.data.deletedBy == null
+        && request.resource.data.deleteReason == null
         && (
           // Root folder.
           (request.resource.data.parentId == null
@@ -140,22 +141,28 @@ service cloud.firestore {
       // override) are fully immutable from the client. No renames, no
       // restores. PRJ-796 will introduce the proper restore flow.
       allow update: if isActiveStaff()
-        && resource.data.deletedAt == null
         && unchanged('createdAt')
         && unchanged('createdBy')
         && unchanged('parentId')
         && unchanged('ancestors')
         && unchanged('depth')
-        && unchanged('deletedAt')
-        && unchanged('deletedBy')
-        // PRJ-865: enforce post-update doc shape. Without this, an update
-        // could omit `deletedAt`/`deletedBy` and the fields would vanish
-        // from the doc, dropping it out of `where('deletedAt','==',null)`
-        // active-folder queries.
-        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy'])
+        && request.resource.data.keys().hasAll(['deletedAt', 'deletedBy', 'deleteReason'])
         && isServerTime(request.resource.data.updatedAt)
         && request.resource.data.updatedBy == request.auth.uid
-        && isNonEmptyString(request.resource.data.name);
+        && isStringOrNull(request.resource.data.deleteReason)
+        && (
+          // Transition 1: active folder rename-only
+          (resource.data.deletedAt == null
+            && request.resource.data.deletedAt == null
+            && request.resource.data.deletedBy == null
+            && isNonEmptyString(request.resource.data.name)
+            && unchanged('deleteReason'))
+          // Transition 2: active → deleted
+          || (resource.data.deletedAt == null
+            && request.resource.data.deletedAt == request.time
+            && request.resource.data.deletedBy == request.auth.uid
+            && unchanged('name'))
+        );
 
       // Hard delete is forbidden in v1. Soft-delete is also blocked here
       // (see comment block above). PRJ-796 ships the real flow.

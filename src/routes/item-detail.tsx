@@ -31,6 +31,7 @@ import {
   getItemById,
   getUserByUid,
   listMovementsForItem,
+  softDeleteItem,
 } from '@/lib/queries';
 import type { Movement, RollItem } from '@/lib/models';
 import LowStockBadge from '@/components/LowStockBadge';
@@ -212,6 +213,24 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+  const onDeleteConfirm = useCallback(async () => {
+    if (!item || !authUser) return;
+    setDeleteSubmitting(true); setDeleteError(null);
+    const result = await softDeleteItem(item.itemId, deleteReason, authUser.uid);
+    setDeleteSubmitting(false);
+    if (result.ok) {
+      setDeleteOpen(false);
+      navigate(`/folders/${item.folderId}`);
+    } else {
+      setDeleteError(result.error.message);
+    }
+  }, [item, authUser, deleteReason, navigate]);
+
   const onUndo = useCallback(async () => {
     if (!lastMovement || !item || !authUser) return;
     setSubmitting(true); setSubmitError(null);
@@ -328,7 +347,54 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
         >
           Print QR
         </button>
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className={`${BTN_SECONDARY} text-red-700 border-red-300`}
+        >
+          Delete item
+        </button>
       </div>
+
+      {deleteOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl">
+            <h2 className="text-base font-semibold text-gray-900">Delete this item?</h2>
+            <p className="mt-1 text-sm text-gray-700">
+              Stock history is preserved. You have 7 days to restore from Recently deleted.
+            </p>
+            <label className="mt-3 block">
+              <span className="text-sm font-medium text-gray-800">Reason for deletion (optional)</span>
+              <textarea
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                maxLength={100}
+                rows={2}
+                className="mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base"
+              />
+            </label>
+            {deleteError ? <p className="mt-2 text-sm text-red-700" role="alert">{deleteError}</p> : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => { void onDeleteConfirm(); }}
+                disabled={deleteSubmitting}
+                className={`${BTN_PRIMARY} bg-red-700`}
+              >
+                {deleteSubmitting ? 'Deleting…' : 'Delete'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeleteOpen(false); setDeleteError(null); }}
+                disabled={deleteSubmitting}
+                className={BTN_SECONDARY}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {undoEligible && lastMovement ? (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
