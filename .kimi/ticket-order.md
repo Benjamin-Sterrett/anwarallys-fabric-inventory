@@ -1,6 +1,6 @@
 # Kimi Ticket Order — Anwarallys Fabric Inventory
 
-**Last updated:** 2026-04-27 (PRJ-872 + PRJ-881 + PRJ-875 merged; see Shipped)
+**Last updated:** 2026-04-28 (PILOT SHIPPED to client. Post-pilot phase added below — Kimi can resume from there once Shaaiz feedback comes in or anytime.)
 **Source of truth:** this file. Original Telegram message preserved here.
 
 ## How to use this file
@@ -92,7 +92,34 @@
 - ~~**PRJ-892**~~ — ✅ SHIPPED PR #50 (2026-04-27) — Write-side idempotency (Movement schema + Rules + boundary). Self-replay defense, safety-critical. PRJ-883 R9 owner_override comp action.
 - **~~PRJ-893~~** — Server-authoritative mount-time reads audit. **SHIPPED BY KIMI PR #34** (see Shipped). Was originally Claude-gated, but scope was smaller than expected (rolls-adjust already had server read; only staff.tsx + comments needed). Retaining in Claude-gate list for future tickets of this class.
 - **PRJ-888** — CI auto-deploy of Firestore Rules + indexes. Infra/CI, gated on Shaaiz minting an SA key.
-- (none remaining in this section)
+- **PRJ-918** — isActive race-window check in write flows (PRJ-910 follow-up). Touches the safety-critical item-adjust + item-detail surfaces. Rules-adjacent guard logic — Claude-only.
+- **PRJ-901** — Tighten `/movements` Rules to require `clientCorrelationId == movementId` after session rollover (PRJ-892 follow-up). Rules change. Claude-only per hard-rules.
+- **PRJ-840** — Read/write model split (architectural debate, held unified for v1). Architectural — Claude-only.
+
+---
+
+## PHASE 6 — POST-PILOT (Kimi-suitable)
+
+These can land in any order. None are blocking — pilot is shipped. Pick up when ready, after Shaaiz feedback comes in, or in idle stretches.
+
+16. **PRJ-902 — Component tests for rolls-adjust SaveState machine**
+    - 7 cases listed in the ticket (success, already-applied late-success, stale-movement, timeout-inconclusive, retry-with-correlationId, meters-mismatch, etc.).
+    - RTL setup is already shipped (PRJ-875). Pure test-writing.
+    - Estimated ~250 LOC.
+
+17. **PRJ-909 — Optimize `listAllActiveItems` for flaky Wi-Fi**
+    - PRJ-905 ships server-first read. On flaky connections this blocks until the server timeout fires before falling back to cache (~5s spinner).
+    - Spec in ticket: race the server read vs a short-timeout cache read; whichever returns first wins. Server read still authoritative if it lands.
+    - Touches `src/lib/queries/items.ts`. Be careful — this query feeds /lowstock and /print-labels, so a regression here re-introduces ghost soft-deleted items.
+    - Estimated ~80 LOC + tests.
+
+**Post-pilot tickets that may arrive from Shaaiz feedback (not yet filed):**
+
+- **CSV import of inventory.** If Shaaiz has a spreadsheet of his fabric stock, build a one-off importer (parse → validate → batch-create items into a chosen folder, dry-run preview before commit). Could save him days of manual entry.
+- **Edge-case bug reports** — long SKU codes, special characters in folder names, unicode in descriptions, slow-mobile-network behavior, older Android device perf.
+- **Workflow gaps** — "how do I do X?" that turns out to need new UI affordance.
+
+File these as they come in. Tag clearly so they're easy to triage post-launch.
 
 ---
 
@@ -134,3 +161,5 @@ Update this list after each polish ticket ships.
 - [2026-04-28] PRJ-921 (PR #68 squash `3eb76b0`) — HOTFIX: remove unused `getDoc` + `updateDoc` imports from `deleted.ts`. Unblocked CI `tsc -b` strict mode, allowing PRJ-797 to reach production. 0 findings, 164 tests.
 - [2026-04-28] PRJ-922 (PR #69 squash `be7383d`) — HOTFIX: delete tombstone on restore to allow re-delete. `restoreItem` tx.delete + Rules `getAfter` gate. Pre-test cleanup of 2 stale smoke-run tombstones. Rules deployed pre-merge. 164 tests.
 - [2026-04-28] PRJ-923 (PR #70 squash `eeac29a`) — /deleted view metadata polish: displayName resolution, delete reason badge, breadcrumb parent paths. subscribeToAllUsers + subscribeToAllFolders queries added. Pure UI, no Rules changes. 165 tests.
+- [2026-04-28] PRJ-924 (PR — squash `21534da`) — Last pre-pilot polish: pre-disable Restore when parent folder deleted + fix folder path duplication in deleted folders. 168 tests.
+- [2026-04-28] PRJ-925 (PR #71 squash `dc3a179`) — Pre-push git hook via simple-git-hooks. `pnpm build && pnpm test` blocks push on failure. Added `prepare` (worktree-aware), `clean` (rimraf --glob), + README docs. 168 tests. Codex R3 owner_override (worktree hook finding is false positive — git hooks shared across all worktrees).
