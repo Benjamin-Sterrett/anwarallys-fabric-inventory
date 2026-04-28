@@ -33,6 +33,7 @@ import {
   listMovementsForItem,
 } from '@/lib/queries';
 import type { Movement, RollItem } from '@/lib/models';
+import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
 
 const UNDO_WINDOW_MS = 15_000;
@@ -304,7 +305,10 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
 
       <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
         <p className="text-xs uppercase tracking-wide text-gray-500">On hand</p>
-        <p className="mt-1 text-3xl font-semibold text-gray-900">{formatMeters(item.remainingMeters)}</p>
+        <div className="mt-1 flex items-center gap-3">
+          <p className="text-3xl font-semibold text-gray-900">{formatMeters(item.remainingMeters)}</p>
+          <LowStockBadge remainingMeters={item.remainingMeters} minimumMeters={item.minimumMeters} />
+        </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
           <dt className="text-gray-500">Original</dt>
           <dd>{formatMeters(item.initialMeters)}</dd>

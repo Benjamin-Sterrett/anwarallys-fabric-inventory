@@ -4,6 +4,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { getFolderById, getItemById, getItemByIdFromServer } from '@/lib/queries';
 import type { RollItem } from '@/lib/models';
+import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
@@ -215,7 +216,6 @@ function ItemPage({ itemId }: { itemId: string }) {
   }
 
   const item = loadState.item;
-  const isLowStock = item.remainingMeters <= item.minimumMeters;
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
@@ -231,11 +231,7 @@ function ItemPage({ itemId }: { itemId: string }) {
       <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex items-center gap-3">
           <p className="text-[32px] font-semibold text-gray-900">{formatMeters(item.remainingMeters)}</p>
-          {isLowStock ? (
-            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-              Low stock
-            </span>
-          ) : null}
+          <LowStockBadge remainingMeters={item.remainingMeters} minimumMeters={item.minimumMeters} />
         </div>
         <p className="text-xs uppercase tracking-wide text-gray-500">On hand</p>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
@@ -269,7 +265,7 @@ function ItemPage({ itemId }: { itemId: string }) {
       <div className="mb-4 flex flex-wrap gap-2">
         <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}`} className={BTN_SECONDARY}>View history</Link>
-        <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print label</Link>
+        <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print QR</Link>
       </div>
     </section>
   );
