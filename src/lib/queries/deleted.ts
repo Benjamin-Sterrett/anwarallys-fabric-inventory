@@ -6,12 +6,14 @@ import {
   collection,
   doc,
   getCountFromServer,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
   runTransaction,
   serverTimestamp,
   Timestamp,
+  updateDoc,
   where,
   type Firestore,
   type Unsubscribe,
@@ -223,6 +225,113 @@ export function subscribeToDeletedItems(
     next: (snap) => onNext(snap.docs.map((d) => d.data())),
     error: (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
   });
+}
+
+/**
+ * Restore a soft-deleted item. Flips delete metadata back to null on the
+ * live `/items/{itemId}` doc; the tombstone in `/deletedRecords` is left
+ * untouched for TTL purge.
+ *
+ * Errors: `invalid-input`, `firestore/no-db`, `firestore/init-failed`,
+ * `item-not-deleted`, `parent-deleted`, `firestore/<FirestoreErrorCode>`,
+ * `firestore/transaction-failed`.
+ */
+export async function restoreItem(
+  itemId: string,
+  actorUid: string,
+): Promise<Result<void>> {
+  if (!isNonEmpty(itemId)) return err('invalid-input', 'itemId is required.');
+  if (!isNonEmpty(actorUid)) return err('invalid-input', 'actorUid is required.');
+
+  const dbR = resolveDb();
+  if (!dbR.ok) return dbR.result;
+  const { db } = dbR;
+
+  const itemRef = doc(db, 'items', itemId).withConverter(itemConverter);
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(itemRef);
+      if (!snap.exists()) throw new Error('item-not-deleted');
+      const liveItem = snap.data();
+      if (liveItem.deletedAt === null) throw new Error('item-not-deleted');
+
+      const folderRef = doc(db, 'folders', liveItem.folderId).withConverter(folderConverter);
+      const folderSnap = await tx.get(folderRef);
+      if (!folderSnap.exists()) throw new Error('parent-deleted');
+      const folder = folderSnap.data();
+      if (folder.deletedAt !== null) throw new Error('parent-deleted');
+
+      tx.update(itemRef, {
+        deletedAt: null,
+        deletedBy: null,
+        deleteReason: null,
+        updatedAt: serverTimestamp(),
+        updatedBy: actorUid,
+      });
+    });
+    return ok(undefined);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message === 'item-not-deleted') return err('item-not-deleted', 'The item is not deleted.');
+    if (message === 'parent-deleted') return err('parent-deleted', 'The parent folder has been deleted.');
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/transaction-failed', message);
+  }
+}
+
+/**
+ * Restore a soft-deleted folder. Flips delete metadata back to null on the
+ * live `/folders/{folderId}` doc.
+ *
+ * Errors: `invalid-input`, `firestore/no-db`, `firestore/init-failed`,
+ * `folder-not-deleted`, `parent-deleted`, `firestore/<FirestoreErrorCode>`,
+ * `firestore/unknown`.
+ */
+export async function restoreFolder(
+  folderId: string,
+  actorUid: string,
+): Promise<Result<void>> {
+  if (!isNonEmpty(folderId)) return err('invalid-input', 'folderId is required.');
+  if (!isNonEmpty(actorUid)) return err('invalid-input', 'actorUid is required.');
+
+  const dbR = resolveDb();
+  if (!dbR.ok) return dbR.result;
+  const { db } = dbR;
+
+  const folderRef = doc(db, 'folders', folderId).withConverter(folderConverter);
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(folderRef);
+      if (!snap.exists()) throw new Error('folder-not-deleted');
+      const liveFolder = snap.data();
+      if (liveFolder.deletedAt === null) throw new Error('folder-not-deleted');
+
+      if (liveFolder.parentId !== null) {
+        const parentRef = doc(db, 'folders', liveFolder.parentId).withConverter(folderConverter);
+        const parentSnap = await tx.get(parentRef);
+        if (!parentSnap.exists()) throw new Error('parent-deleted');
+        const parent = parentSnap.data();
+        if (parent.deletedAt !== null) throw new Error('parent-deleted');
+      }
+
+      tx.update(folderRef, {
+        deletedAt: null,
+        deletedBy: null,
+        deleteReason: null,
+        updatedAt: serverTimestamp(),
+        updatedBy: actorUid,
+      });
+    });
+    return ok(undefined);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message === 'folder-not-deleted') return err('folder-not-deleted', 'The folder is not deleted.');
+    if (message === 'parent-deleted') return err('parent-deleted', 'The parent folder has been deleted.');
+    if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
+    return err('firestore/transaction-failed', message);
+  }
 }
 
 /**

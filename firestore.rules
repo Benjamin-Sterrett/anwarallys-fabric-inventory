@@ -122,24 +122,14 @@ service cloud.firestore {
         );
 
       // Updates: `createdAt`, `createdBy`, `parentId`, `ancestors`, `depth`
-      // are immutable. Folders in v1 are RENAME-ONLY — `deletedAt` and
-      // `deletedBy` are also unchanged on every update.
+      // are immutable.
       //
-      // PRJ-863: in-app folder soft-delete is blocked entirely in v1.
+      // PRJ-796/797: folders support rename (Transition 1), soft-delete
+      // (Transition 2), and restore within 7 days (Transition 3).
       // Firestore Security Rules cannot iterate `folderAncestors[]` (no
       // list-iteration primitive), so we cannot reject item writes inside
-      // descendants of a soft-deleted ancestor. Items.update only checks
-      // the DIRECT parent folder, leaving grandchildren and below freely
-      // writable. Disabling folder soft-delete in Rules forecloses this
-      // entire class of orphan-corruption bug. Folder lifecycle (delete,
-      // cascade, restore with subtree-empty checks) lands in PRJ-796
-      // (Wave 5) with the proper `getCountFromServer`-based UI flow.
-      // Manual cleanup limited to hard-deleting empty leaf folders only;
-      // see README "Firestore Security Rules" section. PRJ-863 supersedes
-      // the round-2 PRJ-860 deferral.
-      // Folders that are already soft-deleted (e.g. via Firebase Console
-      // override) are fully immutable from the client. No renames, no
-      // restores. PRJ-796 will introduce the proper restore flow.
+      // descendants of a soft-deleted ancestor. The UI pre-checks subtree
+      // emptiness before delete; Rules validate the transition itself.
       allow update: if isActiveStaff()
         && unchanged('createdAt')
         && unchanged('createdBy')
@@ -161,6 +151,19 @@ service cloud.firestore {
           || (resource.data.deletedAt == null
             && request.resource.data.deletedAt == request.time
             && request.resource.data.deletedBy == request.auth.uid
+            && unchanged('name'))
+          // Transition 3: deleted → restored (PRJ-797).
+          // 7-day window anchored on server-stamped `deletedAt`.
+          // Parent folder must still be active (if non-root) to prevent
+          // reactivating under a deleted parent (PRJ-863 alignment).
+          || (resource.data.deletedAt != null
+            && request.resource.data.deletedAt == null
+            && request.resource.data.deletedBy == null
+            && request.resource.data.deleteReason == null
+            && (request.time.toMillis() - resource.data.deletedAt.toMillis()) <= 7 * 24 * 60 * 60 * 1000
+            && (resource.data.parentId == null
+              || (exists(/databases/$(database)/documents/folders/$(resource.data.parentId))
+                && get(/databases/$(database)/documents/folders/$(resource.data.parentId)).data.deletedAt == null))
             && unchanged('name'))
         );
 

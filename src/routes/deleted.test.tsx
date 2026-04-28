@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
 import DeletedRoute from './deleted';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToDeletedItems, subscribeToDeletedFolders } from '@/lib/queries';
+import { subscribeToDeletedItems, subscribeToDeletedFolders, restoreItem, restoreFolder } from '@/lib/queries';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
 const mockSubscribeToDeletedItems = vi.hoisted(() => vi.fn());
 const mockSubscribeToDeletedFolders = vi.hoisted(() => vi.fn());
+const mockRestoreItem = vi.hoisted(() => vi.fn());
+const mockRestoreFolder = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/firebase/auth', () => ({
   subscribeToAuthState: mockSubscribeToAuthState,
@@ -20,6 +23,8 @@ vi.mock('@/lib/queries', async () => {
     ...actual,
     subscribeToDeletedItems: mockSubscribeToDeletedItems,
     subscribeToDeletedFolders: mockSubscribeToDeletedFolders,
+    restoreItem: mockRestoreItem,
+    restoreFolder: mockRestoreFolder,
   };
 });
 
@@ -43,6 +48,8 @@ describe('DeletedRoute', () => {
     });
     vi.mocked(subscribeToDeletedItems).mockReturnValue(vi.fn());
     vi.mocked(subscribeToDeletedFolders).mockReturnValue(vi.fn());
+    vi.mocked(restoreItem).mockResolvedValue({ ok: true, data: undefined });
+    vi.mocked(restoreFolder).mockResolvedValue({ ok: true, data: undefined });
   });
 
   it('shows loading skeleton while auth resolves', async () => {
@@ -159,7 +166,7 @@ describe('DeletedRoute', () => {
     expect(screen.getByText('user-c')).toBeInTheDocument();
   });
 
-  it('Restore button is disabled with tooltip', async () => {
+  it('Restore button opens confirmation modal', async () => {
     vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
       onNext([
         {
@@ -194,7 +201,112 @@ describe('DeletedRoute', () => {
     renderRoute();
 
     const restoreBtn = await screen.findByRole('button', { name: /restore/i });
-    expect(restoreBtn).toBeDisabled();
-    expect(restoreBtn).toHaveAttribute('title', 'Available in PRJ-797');
+    expect(restoreBtn).not.toBeDisabled();
+    await userEvent.click(restoreBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Restore item\?/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText('SKU-001')).toBeInTheDocument();
+  });
+
+  it('Restore button click → success → row disappears', async () => {
+    vi.mocked(restoreItem).mockResolvedValue({ ok: true, data: undefined });
+
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([
+        {
+          itemId: 'item-1',
+          sku: 'SKU-001',
+          description: '',
+          folderId: 'folder-1',
+          folderAncestors: [],
+          remainingMeters: 10,
+          lastMovementId: null,
+          initialMeters: 100,
+          minimumMeters: 5,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-b',
+          deleteReason: null,
+        } as unknown as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    const restoreBtn = await screen.findByRole('button', { name: /restore/i });
+    await userEvent.click(restoreBtn);
+
+    const confirmBtns = await screen.findAllByRole('button', { name: /^Restore$/i });
+    expect(confirmBtns.length).toBe(2);
+    await userEvent.click(confirmBtns[1]!);
+
+    await waitFor(() => {
+      expect(screen.queryByText('SKU-001')).not.toBeInTheDocument();
+    });
+    expect(restoreItem).toHaveBeenCalledWith('item-1', 'uid-1');
+  });
+
+  it('Restore button click → failure → error shown', async () => {
+    vi.mocked(restoreItem).mockResolvedValue({
+      ok: false,
+      error: { code: 'parent-deleted', message: 'The parent folder has been deleted.' },
+    });
+
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([
+        {
+          itemId: 'item-1',
+          sku: 'SKU-001',
+          description: '',
+          folderId: 'folder-1',
+          folderAncestors: [],
+          remainingMeters: 10,
+          lastMovementId: null,
+          initialMeters: 100,
+          minimumMeters: 5,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-b',
+          deleteReason: null,
+        } as unknown as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    const restoreBtn = await screen.findByRole('button', { name: /restore/i });
+    await userEvent.click(restoreBtn);
+
+    const confirmBtns = await screen.findAllByRole('button', { name: /^Restore$/i });
+    expect(confirmBtns.length).toBe(2);
+    await userEvent.click(confirmBtns[1]!);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/parent folder has been deleted/i);
+    });
   });
 });
