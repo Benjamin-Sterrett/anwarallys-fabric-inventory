@@ -201,6 +201,33 @@ describe('AuthBar', () => {
     expect(await screen.findByRole('link', { name: /staff/i })).toBeInTheDocument();
   });
 
+  it('renders Change password link for signed-in users', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser());
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((_onNext) => vi.fn());
+
+    renderWithRouter();
+
+    const link = await screen.findByRole('link', { name: /change password/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/change-password');
+  });
+
+  it('does not render Change password link when signed out', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(null);
+      return vi.fn();
+    });
+
+    renderWithRouter();
+
+    await waitFor(() => {
+      expect(screen.queryByRole('link', { name: /change password/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe('deactivation guard (PRJ-910)', () => {
     it('calls signOut and renders the toast when user is deactivated', async () => {
       vi.mocked(subscribeToAuthState).mockImplementation((cb) => {

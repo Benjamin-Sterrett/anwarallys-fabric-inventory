@@ -207,6 +207,12 @@ export default function AuthBar() {
                 Staff
               </Link>
             ) : null}
+            <Link
+              to="/change-password"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+            >
+              Change password
+            </Link>
             <button
               type="button"
               onClick={handleSignOut}

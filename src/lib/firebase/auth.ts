@@ -8,12 +8,17 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword,
   type Auth,
   type User,
   type UserCredential,
   type Unsubscribe,
 } from 'firebase/auth';
 import { getFirebaseApp } from './app';
+import { ok, err } from '@/lib/queries/result';
+import type { Result } from '@/lib/queries/result';
 
 let cachedAuth: Auth | null = null;
 
@@ -83,4 +88,40 @@ export async function signIn(email: string, password: string): Promise<UserCrede
     });
   }
   return signInWithEmailAndPassword(auth, email, password);
+}
+
+/**
+ * Change password for the currently signed-in user.
+ * Re-authenticates with the current password before updating.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<Result<void>> {
+  const auth = getAuth();
+  const user = auth?.currentUser;
+  if (!user || !user.email) {
+    return err('auth/no-user', 'Not signed in.');
+  }
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+    return ok(undefined);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      const code = (error as { code: string }).code;
+      switch (code) {
+        case 'auth/wrong-password':
+        case 'auth/invalid-credential':
+          return err('auth/wrong-password', 'Current password is wrong. Try again.');
+        case 'auth/weak-password':
+          return err('auth/weak-password', 'Password is too weak. Use at least 6 characters.');
+        case 'auth/requires-recent-login':
+          return err('auth/requires-recent-login', 'Sign out and sign back in, then try again.');
+        case 'auth/network-request-failed':
+          return err('auth/network-request-failed', "Can't reach the server. Check your internet.");
+        default:
+          return err(code, error.message);
+      }
+    }
+    return err('auth/unknown', error instanceof Error ? error.message : 'Unknown error.');
+  }
 }

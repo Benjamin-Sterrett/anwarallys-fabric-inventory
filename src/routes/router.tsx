@@ -14,6 +14,7 @@ import NotFoundRoute from './not-found';
 import StaffRoute from './staff';
 import PrintLabelRoute from './print-label';
 import PrintLabelsRoute from './print-labels';
+import ChangePasswordRoute from './change-password';
 import { RequireAdmin, RequireAuth } from './RequireAuth';
 
 function RollsAdjustRedirect() {
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
       { path: 'staff', element: <RequireAdmin><StaffRoute /></RequireAdmin> },
       { path: 'print/label/:itemId', element: <RequireAuth><PrintLabelRoute /></RequireAuth> },
       { path: 'print/labels', element: <RequireAuth><PrintLabelsRoute /></RequireAuth> },
+      { path: 'change-password', element: <RequireAuth><ChangePasswordRoute /></RequireAuth> },
       { path: '*', element: <RequireAuth><NotFoundRoute /></RequireAuth> },
     ],
   },
