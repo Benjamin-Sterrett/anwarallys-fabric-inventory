@@ -6,6 +6,7 @@ export { err, ok, type Result } from './result';
 export {
   listFolderChildren,
   subscribeToFolderChildren,
+  subscribeToAllFolders,
   getFolderById,
   createFolder,
   countActiveItemsInSubtree,
@@ -40,6 +41,7 @@ export {
   listInactiveStaffFromServer,
   getUserByUid,
   subscribeToUserByUid,
+  subscribeToAllUsers,
   createStaffUser,
   renameStaffUser,
   deactivateStaffUser,

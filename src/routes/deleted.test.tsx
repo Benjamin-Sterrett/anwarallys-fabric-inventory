@@ -5,11 +5,13 @@ import { MemoryRouter } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
 import DeletedRoute from './deleted';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToDeletedItems, subscribeToDeletedFolders, restoreItem, restoreFolder } from '@/lib/queries';
+import { subscribeToDeletedItems, subscribeToDeletedFolders, subscribeToAllUsers, subscribeToAllFolders, restoreItem, restoreFolder } from '@/lib/queries';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
 const mockSubscribeToDeletedItems = vi.hoisted(() => vi.fn());
 const mockSubscribeToDeletedFolders = vi.hoisted(() => vi.fn());
+const mockSubscribeToAllUsers = vi.hoisted(() => vi.fn());
+const mockSubscribeToAllFolders = vi.hoisted(() => vi.fn());
 const mockRestoreItem = vi.hoisted(() => vi.fn());
 const mockRestoreFolder = vi.hoisted(() => vi.fn());
 
@@ -23,6 +25,8 @@ vi.mock('@/lib/queries', async () => {
     ...actual,
     subscribeToDeletedItems: mockSubscribeToDeletedItems,
     subscribeToDeletedFolders: mockSubscribeToDeletedFolders,
+    subscribeToAllUsers: mockSubscribeToAllUsers,
+    subscribeToAllFolders: mockSubscribeToAllFolders,
     restoreItem: mockRestoreItem,
     restoreFolder: mockRestoreFolder,
   };
@@ -48,6 +52,20 @@ describe('DeletedRoute', () => {
     });
     vi.mocked(subscribeToDeletedItems).mockReturnValue(vi.fn());
     vi.mocked(subscribeToDeletedFolders).mockReturnValue(vi.fn());
+    vi.mocked(subscribeToAllUsers).mockImplementation((cb) => {
+      cb([
+        { uid: 'user-b', displayName: 'Alice', email: 'alice@local', isActive: true, createdAt: { toMillis: () => 0 }, updatedAt: { toMillis: () => 0 }, createdBy: 'admin', updatedBy: 'admin' },
+        { uid: 'user-c', displayName: 'Bob', email: 'bob@local', isActive: true, createdAt: { toMillis: () => 0 }, updatedAt: { toMillis: () => 0 }, createdBy: 'admin', updatedBy: 'admin' },
+      ] as unknown as import('@/lib/models').User[]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllFolders).mockImplementation((cb) => {
+      cb([
+        { folderId: 'folder-1', name: 'Silks', parentId: null, ancestors: [], depth: 0, createdAt: { toMillis: () => 0 }, updatedAt: { toMillis: () => 0 }, createdBy: 'admin', updatedBy: 'admin', deletedAt: null, deletedBy: null, deleteReason: null },
+        { folderId: 'room-a', name: 'Main Room', parentId: null, ancestors: [], depth: 0, createdAt: { toMillis: () => 0 }, updatedAt: { toMillis: () => 0 }, createdBy: 'admin', updatedBy: 'admin', deletedAt: null, deletedBy: null, deleteReason: null },
+      ] as unknown as import('@/lib/models').Folder[]);
+      return vi.fn();
+    });
     vi.mocked(restoreItem).mockResolvedValue({ ok: true, data: undefined });
     vi.mocked(restoreFolder).mockResolvedValue({ ok: true, data: undefined });
   });
@@ -131,7 +149,7 @@ describe('DeletedRoute', () => {
       expect(screen.getByText('SKU-001')).toBeInTheDocument();
     });
     expect(screen.getByText('Red silk')).toBeInTheDocument();
-    expect(screen.getByText('user-b')).toBeInTheDocument();
+    expect(screen.getByText('Alice')).toBeInTheDocument();
   });
 
   it('renders deleted folders', async () => {
@@ -163,7 +181,7 @@ describe('DeletedRoute', () => {
     await waitFor(() => {
       expect(screen.getByText('Silks')).toBeInTheDocument();
     });
-    expect(screen.getByText('user-c')).toBeInTheDocument();
+    expect(screen.getByText('Bob')).toBeInTheDocument();
   });
 
   it('Restore button opens confirmation modal', async () => {
@@ -310,3 +328,52 @@ describe('DeletedRoute', () => {
     });
   });
 });
+
+  it('shows delete reason, displayName, and breadcrumb path [PRJ-923]', async () => {
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([
+        {
+          itemId: 'item-1',
+          sku: 'SKU-001',
+          description: 'Red silk',
+          folderId: 'folder-1',
+          folderAncestors: ['room-a', 'folder-1'],
+          remainingMeters: 10,
+          lastMovementId: null,
+          initialMeters: 100,
+          minimumMeters: 5,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-b',
+          deleteReason: 'Damaged',
+        } as unknown as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText('SKU-001')).toBeInTheDocument();
+    });
+
+    // displayName resolved from uid
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+
+    // delete reason shown
+    expect(screen.getByText('Damaged')).toBeInTheDocument();
+
+    // breadcrumb path from folderAncestors + folderNameMap
+    expect(screen.getByText(/Main Room/)).toBeInTheDocument();
+    expect(screen.getByText(/Silks/)).toBeInTheDocument();
+  });
