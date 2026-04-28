@@ -23,10 +23,11 @@
 // User → renders the bar (with the displayName resolved as above).
 
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut, subscribeToAuthState } from '@/lib/firebase/auth';
 import { getUserByUid } from '@/lib/queries';
+import { isAdminEmail } from '@/lib/auth/isAdmin';
 
 type AuthState = FirebaseUser | null | undefined;
 
@@ -105,14 +106,24 @@ export default function AuthBar() {
         <p className="text-sm text-gray-700 truncate">
           Signed in as <span className="font-medium text-gray-900">{label}</span>
         </p>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          disabled={busy}
-          className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
-        >
-          {busy ? 'Signing out…' : 'Sign out'}
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdminEmail(authUser.email) && authUser.emailVerified ? (
+            <Link
+              to="/staff"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+            >
+              Staff
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={busy}
+            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
+          >
+            {busy ? 'Signing out…' : 'Sign out'}
+          </button>
+        </div>
       </div>
       {signOutError ? (
         <div className="mx-auto max-w-5xl px-4 pb-2">
