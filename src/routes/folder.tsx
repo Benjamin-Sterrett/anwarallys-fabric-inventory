@@ -18,6 +18,7 @@ import {
 } from '@/lib/queries';
 import LowStockBadge from '@/components/LowStockBadge';
 import type { Folder, RollItem } from '@/lib/models';
+import { Breadcrumbs } from '@/components/Breadcrumbs';
 
 const SEARCH_DEPTH_MIN = 4;
 const BTN_PRIMARY =
@@ -121,27 +122,6 @@ function NewFolderPanel(p: NewFolderPanelProps) {
         </button>
       </div>
     </form>
-  );
-}
-
-// Always rendered, at every depth. Plain links separated by `/`.
-function Breadcrumb({ entries }: { entries: BreadcrumbEntry[] }) {
-  return (
-    <nav aria-label="Folder path" className="text-sm text-gray-700">
-      {entries.map((entry, index) => {
-        const isLast = index === entries.length - 1;
-        const label = entry.name ?? 'Home';
-        const to = entry.folderId === '' ? '/' : `/folders/${entry.folderId}`;
-        return (
-          <span key={`${entry.folderId}-${index}`}>
-            {isLast
-              ? <span className="font-medium text-gray-900">{label}</span>
-              : <Link to={to} className="text-gray-700 underline-offset-2 hover:underline">{label}</Link>}
-            {isLast ? null : <span className="mx-2 text-gray-400">/</span>}
-          </span>
-        );
-      })}
-    </nav>
   );
 }
 
@@ -297,7 +277,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
-      <Breadcrumb entries={breadcrumbEntries} />
+      <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">
           {parentId === null ? 'Home' : currentFolder?.name ?? 'Folder'}
