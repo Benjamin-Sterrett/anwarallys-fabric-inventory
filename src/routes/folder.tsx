@@ -60,9 +60,13 @@ function ChildRow({ folder }: { folder: Folder }) {
       >
         <span className="text-base font-medium text-gray-900">{folder.name}</span>
         <span className="ml-3 inline-flex items-center gap-2">
-          <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
-            {count === 'loading' ? '…' : count === null ? '—' : `${count} items`}
-          </span>
+          {count === 'loading' ? (
+            <span className="inline-block h-5 w-12 animate-pulse rounded-full bg-gray-200" />
+          ) : (
+            <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
+              {count === null ? '—' : `${count} items`}
+            </span>
+          )}
           <span aria-hidden className="text-gray-400">&rsaquo;</span>
         </span>
       </Link>
@@ -125,6 +129,31 @@ function NewFolderPanel(p: NewFolderPanelProps) {
   );
 }
 
+function Skeleton() {
+  return (
+    <section className="mx-auto max-w-2xl px-4 py-8">
+      <div className="h-4 w-32 animate-pulse rounded bg-gray-200" />
+      <div className="mt-3 mb-4 h-8 w-48 animate-pulse rounded bg-gray-200" />
+      <div className="mb-4 flex flex-wrap gap-2">
+        <div className="h-12 w-28 animate-pulse rounded-md bg-gray-200" />
+        <div className="h-12 w-24 animate-pulse rounded-md bg-gray-200" />
+      </div>
+      <ul className="space-y-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <li key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+        ))}
+      </ul>
+      <div className="mt-6">
+        <div className="mb-2 h-4 w-16 animate-pulse rounded bg-gray-200" />
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
@@ -159,11 +188,13 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   // Ancestor chips. Per-doc failure → fall back to short ID prefix so
   // the path stays clickable.
   const [ancestorEntries, setAncestorEntries] = useState<BreadcrumbEntry[]>([]);
+  const [ancestorsLoading, setAncestorsLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    if (!currentFolder) { setAncestorEntries([]); return; }
+    if (!currentFolder) { setAncestorEntries([]); setAncestorsLoading(false); return; }
     const ids = currentFolder.ancestors;
-    if (ids.length === 0) { setAncestorEntries([]); return; }
+    if (ids.length === 0) { setAncestorEntries([]); setAncestorsLoading(false); return; }
+    setAncestorsLoading(true);
     void Promise.all(ids.map((id) => getFolderById(id))).then((results) => {
       if (cancelled) return;
       setAncestorEntries(results.map((r, i) => {
@@ -172,6 +203,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
           ? { folderId: id, name: r.data.name }
           : { folderId: id, name: `…${id.slice(-4)}` };
       }));
+      setAncestorsLoading(false);
     });
     return () => { cancelled = true; };
   }, [currentFolder, retryToken]);
@@ -267,12 +299,15 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const canCreate =
     parentId === null || (currentFolder !== null && currentFolder !== undefined);
 
-  if (authUser === undefined) {
-    return (
-      <section className="mx-auto max-w-2xl px-4 py-8">
-        <p className="text-sm text-gray-600">Loading…</p>
-      </section>
-    );
+  const isLoading =
+    authUser === undefined ||
+    currentFolder === undefined ||
+    children === undefined ||
+    items === undefined ||
+    ancestorsLoading;
+
+  if (isLoading) {
+    return <Skeleton />;
   }
 
   return (
@@ -280,7 +315,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
       <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">
-          {parentId === null ? 'Home' : currentFolder?.name ?? 'Folder'}
+          {parentId === null ? 'Home' : currentFolder?.name ?? ''}
         </h1>
         {currentError ? (
           <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-4">
@@ -347,12 +382,6 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
             className="mt-3 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700"
           >Retry</button>
         </div>
-      ) : children === undefined ? (
-        <ul className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <li key={i} className="h-12 animate-pulse rounded-lg border border-gray-100 bg-gray-50" />
-          ))}
-        </ul>
       ) : filteredChildren && filteredChildren.length > 0 ? (
         <ul className="space-y-2">
           {filteredChildren.map((c) => <ChildRow key={c.folderId} folder={c} />)}
