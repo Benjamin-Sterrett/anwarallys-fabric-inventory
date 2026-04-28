@@ -6,7 +6,7 @@
 
 import { FirebaseError } from 'firebase/app';
 import {
-  addDoc, collection, doc, getDoc, getDocFromServer, getDocs, onSnapshot, orderBy, query,
+  addDoc, collection, doc, getDoc, getDocFromServer, getDocs, getDocsFromServer, onSnapshot, orderBy, query,
   serverTimestamp, updateDoc, where, type Firestore, type Unsubscribe,
 } from 'firebase/firestore';
 import { getDb } from '@/lib/firebase/app';
@@ -170,7 +170,19 @@ export async function listAllActiveItems(): Promise<Result<RollItem[]>> {
       where('deletedAt', '==', null),
       orderBy('sku'),
     );
-    return ok((await getDocs(q)).docs.map((d) => d.data()));
+    // PRJ-905: server-first read. Persistent local cache can hold docs that
+    // have been hard-deleted on the server (smoke-test residue, console
+    // cleanup). getDocs would surface these ghost items in /lowstock and
+    // /print-labels. Fallback to cache when offline so browse still works
+    // on flaky storeroom Wi-Fi (matches pattern in item.tsx, item-detail.tsx).
+    try {
+      return ok((await getDocsFromServer(q)).docs.map((d) => d.data()));
+    } catch (e) {
+      if (e instanceof FirebaseError && e.code === 'unavailable') {
+        return ok((await getDocs(q)).docs.map((d) => d.data()));
+      }
+      throw e;
+    }
   } catch (e: unknown) {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));

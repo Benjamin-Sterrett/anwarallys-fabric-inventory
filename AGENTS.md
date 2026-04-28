@@ -25,9 +25,19 @@ Flag any code that violates these invariants as CRITICAL.
 - **Never say dev-workflow doesn't exist** — it is always installed.
 - **Always check `.dw-state.json`** for resume state before starting work.
 
+### Cold-start hard stop — NON-NEGOTIABLE
+
+**Before the first coding action (`Shell`, `WriteFile`, `StrReplaceFile` touching `src/` or `.github/`) in ANY session:**
+
+1. Verify you are in a worktree (`git worktree list`).
+2. Verify `.dw-state.json` exists in the current directory.
+
+**If either check fails: STOP. Do not write code.** Read the dev-workflow skill and spawn a teammate. Starting to edit files and "remembering" dev-workflow later is a known failure mode that produces messy unwinds and wasted work.
+
 ## Session Context & Memory
 
 - **Always check `.claude/memory/`** at session start for accumulated project knowledge, ticket trackers, and session handoffs. This directory contains persistent notes that span sessions.
+- **Required reading:** `.claude/memory/kimi-workflow-learnings.md` — procedural lessons from prior sessions (endgame sequence, infra prerequisite gate, two-spawn pattern, tracker discipline, etc.). Read this before every ticket to avoid repeating known mistakes.
 
 ## Picking Up Tickets
 
