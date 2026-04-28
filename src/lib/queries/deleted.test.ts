@@ -265,6 +265,7 @@ describe('restoreItem', () => {
     });
 
     const txUpdates: Array<{ ref: unknown; data: unknown }> = [];
+    const txDeletes: Array<{ ref: unknown }> = [];
 
     mockRunTransaction.mockImplementation(async (_db, callback) => {
       const tx = {
@@ -317,6 +318,7 @@ describe('restoreItem', () => {
           return { exists: () => false, data: () => null };
         }),
         update: vi.fn((ref, data) => { txUpdates.push({ ref, data }); }),
+        delete: vi.fn((ref) => { txDeletes.push({ ref }); }),
       };
       return callback(tx);
     });
@@ -376,6 +378,7 @@ describe('restoreItem', () => {
           return { exists: () => false, data: () => null };
         }),
         update: vi.fn(() => undefined),
+        delete: vi.fn(() => undefined),
       };
       return callback(tx);
     });
@@ -451,6 +454,7 @@ describe('restoreItem', () => {
           return { exists: () => false, data: () => null };
         }),
         update: vi.fn(() => undefined),
+        delete: vi.fn(() => undefined),
       };
       return callback(tx);
     });
