@@ -327,7 +327,6 @@ describe('DeletedRoute', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/parent folder has been deleted/i);
     });
   });
-});
 
   it('shows delete reason, displayName, and breadcrumb path [PRJ-923]', async () => {
     vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
@@ -377,3 +376,136 @@ describe('DeletedRoute', () => {
     expect(screen.getByText(/Main Room/)).toBeInTheDocument();
     expect(screen.getByText(/Silks/)).toBeInTheDocument();
   });
+
+  it('pre-disables item Restore when parent folder is deleted [PRJ-924]', async () => {
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([
+        {
+          itemId: 'item-1',
+          sku: 'SKU-001',
+          description: '',
+          folderId: 'folder-deleted',
+          folderAncestors: [],
+          remainingMeters: 10,
+          lastMovementId: null,
+          initialMeters: 100,
+          minimumMeters: 5,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-b',
+          deleteReason: null,
+        } as unknown as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([
+        {
+          folderId: 'folder-deleted',
+          name: 'Deleted Parent',
+          parentId: null,
+          ancestors: [],
+          depth: 0,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-c',
+        } as unknown as import('@/lib/models').Folder,
+      ]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    const btn = await screen.findByRole('button', { name: /unavailable/i });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Restore the parent folder first');
+  });
+
+  it('pre-disables folder Restore when its parent is deleted [PRJ-924]', async () => {
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([
+        {
+          folderId: 'folder-child',
+          name: 'Child Folder',
+          parentId: 'folder-deleted',
+          ancestors: ['folder-deleted'],
+          depth: 1,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-c',
+        } as unknown as import('@/lib/models').Folder,
+        {
+          folderId: 'folder-deleted',
+          name: 'Deleted Parent',
+          parentId: null,
+          ancestors: [],
+          depth: 0,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'user-c',
+        } as unknown as import('@/lib/models').Folder,
+      ]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    const btns = await screen.findAllByRole('button', { name: /unavailable/i });
+    expect(btns.length).toBe(1);
+    expect(btns[0]).toHaveAttribute('title', 'Restore the parent folder first');
+  });
+
+  it('does not duplicate folder parent path segment [PRJ-924]', async () => {
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([
+        {
+          folderId: 'folder-1',
+          name: 'Silks',
+          parentId: 'room-a',
+          ancestors: ['room-a'],
+          depth: 1,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 7200_000),
+          deletedBy: 'user-c',
+        } as unknown as import('@/lib/models').Folder,
+      ]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText('Silks')).toBeInTheDocument();
+    });
+
+    const parentText = screen.getByText(/Parent:/);
+    expect(parentText.textContent).toBe('Parent: Main Room');
+    expect(parentText.textContent).not.toMatch(/Main Room.*Main Room/);
+  });
+});
