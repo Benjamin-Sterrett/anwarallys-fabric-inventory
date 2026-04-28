@@ -1,4 +1,4 @@
-// Reason chip selector — extracted from rolls-adjust.tsx (PRJ-788).
+// Reason chip selector — extracted from item-adjust.tsx (PRJ-788).
 // Reusable across any surface that needs a MovementReason selection.
 
 import { useCallback, type ChangeEvent } from 'react';

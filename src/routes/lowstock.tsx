@@ -119,7 +119,7 @@ export default function LowStockRoute() {
               <Link to={`/items/${item.itemId}`} className={BTN_SECONDARY}>
                 View
               </Link>
-              <Link to={`/rolls/${item.itemId}/adjust`} className={BTN_PRIMARY}>
+              <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>
                 Adjust stock
               </Link>
             </div>
