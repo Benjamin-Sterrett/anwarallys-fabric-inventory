@@ -339,7 +339,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
     }, STEP_DELAY_MS);
   }, [stopRepeat, stepBy]);
 
-  const onTab = useCallback((next: Tab) => { setTab(next); setMetersInput(''); setSubmitError(null); }, []);
+  const onTab = useCallback((next: Tab) => {
+    setTab(next);
+    setMetersInput('');
+    setReason(null);
+    setNote('');
+    setSubmitError(null);
+  }, []);
 
   const onSavePressed = useCallback(() => {
     setSubmitError(null);
