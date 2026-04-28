@@ -100,12 +100,14 @@ function DeletedItemsSection({
   canRestore,
   displayNameMap,
   folderNameMap,
+  deletedFolderIds,
 }: {
   items: RollItem[];
   onRestore: (item: RollItem) => void;
   canRestore: (item: RollItem) => boolean;
   displayNameMap: Map<string, string>;
   folderNameMap: Map<string, string>;
+  deletedFolderIds: Set<string>;
 }) {
   if (items.length === 0) {
     return (
@@ -126,15 +128,27 @@ function DeletedItemsSection({
                 <p className="mt-0.5 truncate text-xs text-gray-600">{item.description}</p>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={() => onRestore(item)}
-              disabled={!canRestore(item)}
-              title={canRestore(item) ? undefined : 'Restore window has expired'}
-              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {canRestore(item) ? 'Restore' : 'Expired'}
-            </button>
+            {(() => {
+              const expired = !canRestore(item);
+              const parentDeleted = deletedFolderIds.has(item.folderId);
+              const disabled = expired || parentDeleted;
+              const title = parentDeleted
+                ? 'Restore the parent folder first'
+                : expired
+                  ? 'Restore window has expired'
+                  : undefined;
+              return (
+                <button
+                  type="button"
+                  onClick={() => onRestore(item)}
+                  disabled={disabled}
+                  title={title}
+                  className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {parentDeleted ? 'Unavailable' : expired ? 'Expired' : 'Restore'}
+                </button>
+              );
+            })()}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
             <span className="truncate max-w-[200px]">
@@ -167,12 +181,14 @@ function DeletedFoldersSection({
   canRestore,
   displayNameMap,
   folderNameMap,
+  deletedFolderIds,
 }: {
   folders: Folder[];
   onRestore: (folder: Folder) => void;
   canRestore: (folder: Folder) => boolean;
   displayNameMap: Map<string, string>;
   folderNameMap: Map<string, string>;
+  deletedFolderIds: Set<string>;
 }) {
   if (folders.length === 0) {
     return (
@@ -192,18 +208,30 @@ function DeletedFoldersSection({
               <p className="mt-0.5 text-xs text-gray-600">
                 {folder.parentId === null
                   ? 'Root'
-                  : `Parent: ${buildBreadcrumb(folder.ancestors.concat(folder.parentId), folderNameMap)}`}
+                  : `Parent: ${buildBreadcrumb(folder.ancestors, folderNameMap)}`}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => onRestore(folder)}
-              disabled={!canRestore(folder)}
-              title={canRestore(folder) ? undefined : 'Restore window has expired'}
-              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {canRestore(folder) ? 'Restore' : 'Expired'}
-            </button>
+            {(() => {
+              const expired = !canRestore(folder);
+              const parentDeleted = folder.parentId !== null && deletedFolderIds.has(folder.parentId);
+              const disabled = expired || parentDeleted;
+              const title = parentDeleted
+                ? 'Restore the parent folder first'
+                : expired
+                  ? 'Restore window has expired'
+                  : undefined;
+              return (
+                <button
+                  type="button"
+                  onClick={() => onRestore(folder)}
+                  disabled={disabled}
+                  title={title}
+                  className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {parentDeleted ? 'Unavailable' : expired ? 'Expired' : 'Restore'}
+                </button>
+              );
+            })()}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
             <span>{displayNameMap.get(folder.deletedBy || '') || folder.deletedBy || '—'}</span>
@@ -306,6 +334,13 @@ export default function DeletedRoute() {
   const filteredFolders = useMemo(() =>
     folders?.filter(folder => folder.deletedAt instanceof Timestamp && folder.deletedAt.toMillis() >= now - RETENTION_MS) ?? [],
   [folders, now]);
+  const deletedFolderIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of filteredFolders) {
+      set.add(f.folderId);
+    }
+    return set;
+  }, [filteredFolders]);
   const canRestoreItem = (item: RollItem) =>
     item.deletedAt instanceof Timestamp && item.deletedAt.toMillis() >= now - RESTORE_WINDOW_MS;
   const canRestoreFolder = (folder: Folder) =>
@@ -414,6 +449,7 @@ export default function DeletedRoute() {
             canRestore={canRestoreItem}
             displayNameMap={displayNameMap}
             folderNameMap={folderNameMap}
+            deletedFolderIds={deletedFolderIds}
           />
         )}
       </div>
@@ -437,6 +473,7 @@ export default function DeletedRoute() {
             canRestore={canRestoreFolder}
             displayNameMap={displayNameMap}
             folderNameMap={folderNameMap}
+            deletedFolderIds={deletedFolderIds}
           />
         )}
       </div>
