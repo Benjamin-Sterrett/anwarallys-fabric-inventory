@@ -105,7 +105,7 @@ function ItemFormPage(props: ItemFormPageProps) {
   // (sku, description, supplier, etc.). These fields do not affect stock
   // correctness, so a briefly stale cache is harmless. Keeping cache-
   // backed reads preserves offline-friendly UX per the explicit pilot
-  // policy. Safety-critical stock adjustments live in rolls-adjust.tsx.
+  // policy. Safety-critical stock adjustments live in item-adjust.tsx.
   useEffect(() => {
     if (authUser === undefined) return;
     let cancelled = false;

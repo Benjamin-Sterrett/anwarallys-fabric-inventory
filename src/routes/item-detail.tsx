@@ -9,8 +9,8 @@
 //   • The 15-sec Undo window is anchored on server-stamped
 //     `Movement.at.toMillis()` (PRJ-883 R3), not on mount time, so a
 //     stale-cache rehydration cannot extend it.
-//   • The safety-critical mount lives in `/rolls/{id}/adjust`
-//     (`rolls-adjust.tsx`), which keeps `getItemByIdFromServer` per
+//   • The safety-critical mount lives in `/items/{id}/adjust`
+//     (`item-adjust.tsx`), which keeps `getItemByIdFromServer` per
 //     PRJ-883 R7. That route is the authoritative surface for stock
 //     writes; this one is read-mostly + Undo entry.
 // Reverting the mount-time read here was lead Codex round 1 P1 on
@@ -86,7 +86,7 @@ function formatRelative(at: unknown, now: number): string {
   return `${day}d ago`;
 }
 
-// Inline subset of rolls-adjust.tsx mapErrorCode — only the codes the
+// Inline subset of item-adjust.tsx mapErrorCode — only the codes the
 // Undo path can surface. Extraction to a shared util is its own ticket.
 function mapErrorCode(code: string, fallback: string): string {
   switch (code) {
@@ -259,7 +259,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
       return;
     }
     // In-place setItem from authoritative boundary return — same pattern
-    // as rolls-adjust.tsx onConfirm/onUndo (lead Codex P2: refetching
+    // as item-adjust.tsx onConfirm/onUndo (lead Codex P2: refetching
     // here would unmount the freshly-rendered Undo affordance).
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
     // Refresh history so the new reversal row + suppressed Undo render.
@@ -334,7 +334,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <Link to={`/rolls/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
+        <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}/edit`} className={BTN_SECONDARY}>Edit metadata</Link>
         <button
           type="button"

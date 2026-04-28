@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
 
 import App from '../App';
 import DashboardRoute from './index';
@@ -6,7 +6,7 @@ import LoginRoute from './login';
 import ItemRoute from './item';
 import ItemNewRoute, { ItemEditRoute } from './item-form';
 import ItemDetailRoute from './item-detail';
-import RollsAdjustRoute from './rolls-adjust';
+import ItemAdjustRoute from './item-adjust';
 import FolderRoute from './folder';
 import DeletedRoute from './deleted';
 import LowStockRoute from './lowstock';
@@ -15,6 +15,11 @@ import StaffRoute from './staff';
 import PrintLabelRoute from './print-label';
 import PrintLabelsRoute from './print-labels';
 import { RequireAdmin, RequireAuth } from './RequireAuth';
+
+function RollsAdjustRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/items/${id}/adjust`} replace />;
+}
 
 // Single source of truth for the route tree. Adding a route = add a line here.
 // Paths mirror the URL scheme locked in research/synthesis.md §2 + §3.
@@ -36,7 +41,8 @@ export const router = createBrowserRouter([
       { index: true, element: <RequireAuth><DashboardRoute /></RequireAuth> },
       { path: 'login', element: <LoginRoute /> },
       { path: 'i/:itemId', element: <ItemRoute /> },
-      { path: 'rolls/:id/adjust', element: <RequireAuth><RollsAdjustRoute /></RequireAuth> },
+      { path: 'items/:id/adjust', element: <RequireAuth><ItemAdjustRoute /></RequireAuth> },
+      { path: 'rolls/:id/adjust', element: <RollsAdjustRedirect /> },
       { path: 'folders/:id', element: <RequireAuth><FolderRoute /></RequireAuth> },
       // PRJ-784: item create + edit forms. Create is folder-scoped so the
       // form can derive `folderAncestors` from the parent folder doc.

@@ -267,7 +267,7 @@ function ItemPage({ itemId }: { itemId: string }) {
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <Link to={`/rolls/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
+        <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}`} className={BTN_SECONDARY}>View history</Link>
         <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print label</Link>
       </div>

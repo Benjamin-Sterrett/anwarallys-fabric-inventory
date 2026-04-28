@@ -714,7 +714,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
   );
 }
 
-export default function RollsAdjustRoute() {
+export default function ItemAdjustRoute() {
   const id = useParams<{ id: string }>().id ?? '';
   if (!id) {
     return <section className="mx-auto max-w-2xl px-4 py-8"><p className="text-sm text-red-700">Missing item id in URL.</p></section>;
