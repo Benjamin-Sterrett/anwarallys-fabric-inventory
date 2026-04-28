@@ -232,10 +232,24 @@ export function subscribeToActiveItemsInFolder(
     where('deletedAt', '==', null),
     orderBy('sku'),
   );
-  return onSnapshot(q, {
-    next: (snap) => onNext(snap.docs.map((d) => d.data())),
-    error: (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
-  });
+  // PRJ-905 pattern: ignore cache-only snapshots until the first server
+  // snapshot arrives. Persistent local cache can retain docs that have
+  // been hard-deleted on the server (smoke-test residue, console cleanup).
+  // onSnapshot always fires with cached data first; without this guard the
+  // header badge can briefly show a stale count that disagrees with /lowstock.
+  let serverSeen = false;
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (!serverSeen && snap.metadata.fromCache) {
+        return;
+      }
+      serverSeen = true;
+      onNext(snap.docs.map((d) => d.data()));
+    },
+    (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
+  );
 }
 
 /**
