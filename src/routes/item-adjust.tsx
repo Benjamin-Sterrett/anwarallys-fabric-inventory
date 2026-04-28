@@ -178,20 +178,25 @@ function HoldToConfirm({ label, onConfirm, disabled }: { label: string; onConfir
   const ringStyle: CSSProperties = { transition: progress === 0 ? 'stroke-dashoffset 200ms ease-out' : 'none' };
 
   return (
-    <button
-      type="button" disabled={disabled}
-      onPointerDown={start} onPointerUp={cancel} onPointerCancel={cancel} onPointerLeave={cancel}
-      className="relative flex w-full items-center justify-center gap-3 rounded-md bg-gray-900 px-6 py-5 text-base font-semibold text-white disabled:opacity-50"
-      aria-label={`Hold to confirm: ${label}`}
-    >
-      <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
-        <circle cx="32" cy="32" r={RADIUS} stroke="rgba(255,255,255,0.25)" strokeWidth="4" fill="none" />
-        <circle cx="32" cy="32" r={RADIUS} stroke="white" strokeWidth="4" fill="none"
-          strokeDasharray={CIRC} strokeDashoffset={dashOffset} strokeLinecap="round"
-          transform="rotate(-90 32 32)" style={ringStyle} />
-      </svg>
-      <span>{progress > 0 && progress < 1 ? 'Hold…' : label}</span>
-    </button>
+    <div className="w-full">
+      <button
+        type="button" disabled={disabled}
+        onPointerDown={start} onPointerUp={cancel} onPointerCancel={cancel} onPointerLeave={cancel}
+        className="relative flex w-full items-center justify-center gap-3 rounded-md bg-gray-900 px-6 py-5 text-base font-semibold text-white disabled:opacity-50"
+        aria-label={`Hold to confirm: ${label}`}
+      >
+        <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="32" cy="32" r={RADIUS} stroke="rgba(255,255,255,0.25)" strokeWidth="4" fill="none" />
+          <circle cx="32" cy="32" r={RADIUS} stroke="white" strokeWidth="4" fill="none"
+            strokeDasharray={CIRC} strokeDashoffset={dashOffset} strokeLinecap="round"
+            transform="rotate(-90 32 32)" style={ringStyle} />
+        </svg>
+        <span>{progress > 0 && progress < 1 ? 'Hold…' : label}</span>
+      </button>
+      <p className="mt-2 text-center text-xs text-gray-600">
+        Press and hold to confirm
+      </p>
+    </div>
   );
 }
 
