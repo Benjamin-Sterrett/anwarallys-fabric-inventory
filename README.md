@@ -53,6 +53,7 @@ pnpm dev                      # http://localhost:5173
 - `pnpm build` — type-check + production build to `dist/`
 - `pnpm typecheck` — strict TS check only
 - `pnpm preview` — serve the built `dist/` locally
+- `pnpm clean` — removes Vite cache, tsbuildinfo, and dist for cache hygiene
 
 Tests land with PRJ-779+ (Vitest). No test runner is installed yet.
 
@@ -164,3 +165,5 @@ All implementation goes through the `dev-workflow` skill. No direct coding.
 - One sub-ticket = one branch = one PR (≤500 LOC).
 - Context7 doc lookup required before coding with any library.
 - Codex must APPROVE the PR before merge.
+- `pnpm install` auto-installs a pre-push hook running `pnpm build && pnpm test`.
+  Use `git push --no-verify` to bypass the hook when necessary.
