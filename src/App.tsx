@@ -13,7 +13,6 @@ export default function App() {
           <Link to="/" className="text-lg font-semibold text-gray-900">
             Fabric Inventory
           </Link>
-          <span className="text-xs text-gray-500">Scaffold build</span>
         </div>
       </header>
       <AuthBar />
