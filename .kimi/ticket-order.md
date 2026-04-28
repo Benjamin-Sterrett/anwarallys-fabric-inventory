@@ -124,3 +124,4 @@
 - [2026-04-27] PRJ-905 (PR #51 squash `0266c76`) — Server-first read in `listAllActiveItems` with offline cache fallback. Fixes ghost soft-deleted items surfacing in /lowstock and /print-labels. Lead Codex R4: owner_override (theoretical P2 finding: flaky-Wi-Fi optimization filed as PRJ-909).
 - [2026-04-27] PRJ-908 (PR #52 squash `6a0c867`) — Admin-only Staff nav link in AuthBar. Lead Codex: owner_override at R3 (parser false negative — no explicit VERDICT but clean prose).
 - [2026-04-27] PRJ-906 (PR #53 squash `96705e7`) — Rename /rolls/:id/adjust to /items/:id/adjust + legacy redirect. File renamed rolls-adjust.tsx → item-adjust.tsx. Lead Codex: owner_override (2 P2 findings on debug artifacts, not in PR).
+- [2026-04-27] PRJ-907 (PR #54 squash `e88c7df`) — Fix React 19 state batching race in onUndo: setSnack('Undone.') before setLastMovement(null). Lead Codex: owner_override (4th consecutive PR with no explicit VERDICT line — known tooling issue).
