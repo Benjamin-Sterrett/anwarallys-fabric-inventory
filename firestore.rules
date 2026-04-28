@@ -489,7 +489,15 @@ service cloud.firestore {
       // on movement create runs server-side via Rules `get()` which has
       // privileged read regardless of this rule. Admins can read any
       // user (Staff page in PRJ-856). Listing collection is admin-only.
-      allow get: if isAdminUser() || (isActiveStaff() && uid == request.auth.uid);
+      //
+      // PRJ-910: self-read does NOT require `isActiveStaff()`. A deactivated
+      // user reading their own doc grants nothing — they already know they
+      // were deactivated (the admin told them). The client uses this read
+      // to detect deactivation and bounce with a clear message instead of
+      // leaving the user on a screen full of permission-denied errors.
+      // Inventory collections still gate on `isActiveStaff()`, so this
+      // relaxation does NOT widen any operational access path.
+      allow get: if isAdminUser() || (isAuthed() && uid == request.auth.uid);
       allow list: if isAdminUser();
 
       allow create: if isAdminUser()

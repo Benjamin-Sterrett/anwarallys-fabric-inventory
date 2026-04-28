@@ -4,20 +4,21 @@ import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import AuthBar from './AuthBar';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { getUserByUid } from '@/lib/queries';
+import { subscribeToUserByUid } from '@/lib/queries';
 import { isAdminEmail } from '@/lib/auth/isAdmin';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
-const mockGetUserByUid = vi.hoisted(() => vi.fn());
+const mockSubscribeToUserByUid = vi.hoisted(() => vi.fn());
+const mockSignOut = vi.hoisted(() => vi.fn());
 const mockIsAdminEmail = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/firebase/auth', () => ({
   subscribeToAuthState: mockSubscribeToAuthState,
-  signOut: vi.fn(),
+  signOut: mockSignOut,
 }));
 
 vi.mock('@/lib/queries', () => ({
-  getUserByUid: mockGetUserByUid,
+  subscribeToUserByUid: mockSubscribeToUserByUid,
 }));
 
 vi.mock('@/lib/auth/isAdmin', () => ({
@@ -47,7 +48,7 @@ describe('AuthBar', () => {
       cb(null);
       return vi.fn();
     });
-    vi.mocked(getUserByUid).mockResolvedValue({ ok: true, data: null });
+    vi.mocked(subscribeToUserByUid).mockReturnValue(vi.fn());
     vi.mocked(isAdminEmail).mockReturnValue(false);
   });
 
@@ -70,7 +71,6 @@ describe('AuthBar', () => {
       cb(fakeUser({ email: 'admin@fabric.local', emailVerified: true }));
       return vi.fn();
     });
-    vi.mocked(getUserByUid).mockResolvedValue({ ok: true, data: null });
 
     renderWithRouter();
 
@@ -112,12 +112,86 @@ describe('AuthBar', () => {
       cb(fakeUser({ email: 'admin@fabric.local', emailVerified: true }));
       return vi.fn();
     });
-    vi.mocked(getUserByUid).mockResolvedValue({ ok: true, data: null });
 
     renderWithRouter();
 
     const staffLink = await screen.findByRole('link', { name: /staff/i });
     await user.click(staffLink);
     expect(staffLink).toHaveAttribute('href', '/staff');
+  });
+
+  describe('deactivation guard (PRJ-910)', () => {
+    it('calls signOut and renders the toast when user is deactivated', async () => {
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser());
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext({
+          uid: 'uid-1',
+          email: 'staff@fabric.local',
+          displayName: 'Staff User',
+          isActive: false,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(mockSignOut).toHaveBeenCalledTimes(1);
+      });
+      expect(
+        screen.getByText(/Your account has been turned off\. Contact your store admin to be reactivated\./),
+      ).toBeInTheDocument();
+    });
+
+    it('does NOT call signOut and does NOT render toast when user is active', async () => {
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser());
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext({
+          uid: 'uid-1',
+          email: 'staff@fabric.local',
+          displayName: 'Staff User',
+          isActive: true,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await screen.findByText(/Signed in as/);
+      expect(mockSignOut).not.toHaveBeenCalled();
+      expect(
+        screen.queryByText(/Your account has been turned off/),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does NOT call signOut when user doc is missing', async () => {
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser());
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext(null);
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await screen.findByText(/Signed in as/);
+      expect(mockSignOut).not.toHaveBeenCalled();
+    });
   });
 });

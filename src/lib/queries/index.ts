@@ -30,6 +30,7 @@ export {
   listInactiveStaff,
   listInactiveStaffFromServer,
   getUserByUid,
+  subscribeToUserByUid,
   createStaffUser,
   renameStaffUser,
   deactivateStaffUser,

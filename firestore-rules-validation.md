@@ -95,6 +95,15 @@ commit. The /movements create rule cross-validates BOTH pre-state
 together; a custom client cannot mutate stock without writing a real,
 attributable audit row.
 
+## PRJ-910 — Deactivated user self-read scenarios
+
+| # | Scenario | Expected | Actual |
+|---|---|---|---|
+| 16 | Authenticated deactivated staff reads own `/users/{uid}` doc | Allowed (relaxed self-read rule) | _pending_ |
+| 17 | Authenticated deactivated staff reads another user's `/users/{other-uid}` doc | Rejected (not admin, not self) | _pending_ |
+| 18 | Authenticated active staff reads own `/users/{uid}` doc | Allowed (unchanged) | _pending_ |
+| 19 | Admin reads deactivated staff's `/users/{uid}` doc | Allowed (admin parity unchanged) | _pending_ |
+
 ## Additional sanity checks
 
 - Unauth WRITE → Rejected. Unknown collection → Rejected (catch-all).

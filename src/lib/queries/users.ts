@@ -32,12 +32,14 @@ import {
   getDoc,
   getDocs,
   getDocsFromServer,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
   type Firestore,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { getDb, getFirebaseApp } from '@/lib/firebase/app';
 import { userConverter } from '@/lib/firebase/converters';
@@ -112,6 +114,50 @@ export async function getUserByUid(uid: string): Promise<Result<User | null>> {
     if (e instanceof FirebaseError) return err(`firestore/${e.code}`, e.message);
     return err('firestore/unknown', e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * Real-time subscription to a single `/users/{uid}` doc. Emits `null`
+ * when the doc is missing. Used by AuthBar for both displayName resolution
+ * and deactivation guard (PRJ-910); mid-session deactivation fires within
+ * one snapshot round-trip.
+ *
+ * Errors: `firestore/no-db`, `firestore/init-failed`,
+ * `firestore/<FirestoreErrorCode>`.
+ */
+export function subscribeToUserByUid(
+  uid: string,
+  onNext: (user: User | null) => void,
+  onError: (error: { code: string; message: string }) => void,
+): Unsubscribe {
+  if (!isNonEmpty(uid)) {
+    queueMicrotask(() => onError({ code: 'invalid-input', message: 'uid is required.' }));
+    return () => {};
+  }
+
+  let db: Firestore;
+  try {
+    const maybeDb = getDb();
+    if (!maybeDb) {
+      queueMicrotask(() => onError({ code: 'firestore/no-db', message: 'Firebase is not configured.' }));
+      return () => {};
+    }
+    db = maybeDb;
+  } catch (e: unknown) {
+    queueMicrotask(() =>
+      onError({
+        code: 'firestore/init-failed',
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return () => {};
+  }
+
+  const ref = doc(db, 'users', uid).withConverter(userConverter);
+  return onSnapshot(ref, {
+    next: (snap) => onNext(snap.exists() ? snap.data() : null),
+    error: (e) => onError({ code: `firestore/${e.code}`, message: e.message }),
+  });
 }
 
 export interface CreateStaffUserParams {
