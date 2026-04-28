@@ -532,8 +532,9 @@ function AdjustPage({ itemId }: { itemId: string }) {
       actorName: freshUser.data.displayName,
       reversesMovementId: lastMovement.movementId,
     });
-    setSubmitting(false); setLastMovement(null);
+    setSubmitting(false);
     if (!r.ok) {
+      setLastMovement(null);
       setSnack(null);
       setSubmitError(`Could not undo: ${mapErrorCode(r.error.code, r.error.message)}`);
       return;
@@ -543,7 +544,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
     // see onConfirm comments). The boundary returns server-authoritative
     // values; nothing else needs refreshing.
     setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
+    // State ordering fix [PRJ-907]: setSnack must come before setLastMovement(null).
+    // If lastMovement becomes null first, the snack-only auto-dismiss effect sees
+    // the stale "Saved: X → Y" snack and schedules a 4s clear, racing React 19
+    // batching and potentially hiding the "Undone." message immediately.
     setSnack('Undone.');
+    setLastMovement(null);
   }, [lastMovement, authUser, userDoc, item]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
