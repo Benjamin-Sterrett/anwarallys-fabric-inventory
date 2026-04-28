@@ -79,6 +79,9 @@ export default function AuthBar() {
     const unsub = subscribeToUserByUid(
       authUser.uid,
       (user) => {
+        if (user && user.isActive === true) {
+          setDeactivated(false);
+        }
         if (user && user.isActive === false) {
           setDeactivated(true);
           // Preserve admin recovery path: an inactive admin can still reach

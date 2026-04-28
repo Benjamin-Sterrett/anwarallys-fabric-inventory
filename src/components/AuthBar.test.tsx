@@ -178,6 +178,58 @@ describe('AuthBar', () => {
       ).not.toBeInTheDocument();
     });
 
+    it('clears the toast when a deactivated user is reactivated mid-session', async () => {
+      let snapshotCb: ((user: import('@/lib/models').User | null) => void) | null = null;
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        cb(fakeUser());
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        snapshotCb = onNext;
+        onNext({
+          uid: 'uid-1',
+          email: 'staff@fabric.local',
+          displayName: 'Staff User',
+          isActive: false,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Your account has been turned off\. Contact your store admin to be reactivated\./),
+        ).toBeInTheDocument();
+      });
+
+      // Simulate admin reactivating the user mid-session
+      act(() => {
+        snapshotCb?.({
+          uid: 'uid-1',
+          email: 'staff@fabric.local',
+          displayName: 'Staff User',
+          isActive: true,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByText(/Your account has been turned off/),
+        ).not.toBeInTheDocument();
+      });
+      // signOut should only have been called once (on the first deactivate snapshot)
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
+    });
+
     it('does NOT call signOut when user doc is missing', async () => {
       vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
         cb(fakeUser());
