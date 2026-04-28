@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import AuthBar from './AuthBar';
@@ -222,6 +222,54 @@ describe('AuthBar', () => {
         ).toBeInTheDocument();
       });
       expect(mockSignOut).not.toHaveBeenCalled();
+      // Admin must still see the Staff link so they can navigate to /staff
+      // and reactivate themselves.
+      expect(screen.getByRole('link', { name: /staff/i })).toBeInTheDocument();
+    });
+
+    it('keeps toast visible after sign-out for deactivated non-admin', async () => {
+      let authCb: ((user: import('firebase/auth').User | null) => void) | null = null;
+      vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+        authCb = cb;
+        cb(fakeUser());
+        return vi.fn();
+      });
+      vi.mocked(subscribeToUserByUid).mockImplementation((_uid, onNext) => {
+        onNext({
+          uid: 'uid-1',
+          email: 'staff@fabric.local',
+          displayName: 'Staff User',
+          isActive: false,
+          createdAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          updatedAt: { toMillis: () => 0 } as unknown as import('firebase/firestore').Timestamp,
+          createdBy: 'admin-1',
+          updatedBy: 'admin-1',
+        });
+        return vi.fn();
+      });
+
+      renderWithRouter();
+
+      await waitFor(() => {
+        expect(mockSignOut).toHaveBeenCalledTimes(1);
+      });
+      expect(
+        screen.getByText(/Your account has been turned off\. Contact your store admin to be reactivated\./),
+      ).toBeInTheDocument();
+
+      // Simulate auth state becoming null after signOut
+      act(() => {
+        authCb?.(null);
+      });
+
+      // Toast must still be visible even though authUser is now null
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Your account has been turned off\. Contact your store admin to be reactivated\./),
+        ).toBeInTheDocument();
+      });
+      // The normal bar (Signed in as) should no longer render
+      expect(screen.queryByText(/Signed in as/)).not.toBeInTheDocument();
     });
 
     it('does NOT call signOut for deactivated admin with unverified email', async () => {

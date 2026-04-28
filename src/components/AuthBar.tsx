@@ -31,7 +31,7 @@
 // there is no signed-out chrome to display.
 // User → renders the bar (with the displayName resolved as above).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut, subscribeToAuthState } from '@/lib/firebase/auth';
@@ -53,11 +53,19 @@ export default function AuthBar() {
     return unsub;
   }, []);
 
-  // Reset deactivation flag when the user changes so a new sign-in starts
-  // fresh and the toast doesn't flash for a different user.
+  // Reset deactivation flag only when a NEW user signs in — NOT on sign-out.
+  // This keeps the toast visible after auto-sign-out so the user sees the
+  // explanation before the route guard redirects to /login.
+  const prevUidRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    setDeactivated(false);
-  }, [authUser?.uid]);
+    if (authUser?.uid && authUser.uid !== prevUidRef.current) {
+      setDeactivated(false);
+      prevUidRef.current = authUser.uid;
+    }
+    if (!authUser) {
+      prevUidRef.current = undefined;
+    }
+  }, [authUser]);
 
   // Subscribe to the canonical /users/{uid} doc for displayName AND
   // deactivation state. The subscription lives for the lifetime of the
@@ -125,19 +133,22 @@ export default function AuthBar() {
     }
   }, [navigate]);
 
-  if (deactivated) {
-    return (
-      <div data-deactivation-toast className="border-b border-red-200 bg-red-50">
-        <div className="mx-auto max-w-5xl px-4 py-3">
-          <p className="text-sm font-medium text-red-800">
-            Your account has been turned off. Contact your store admin to be reactivated.
-          </p>
-        </div>
+  const banner = deactivated ? (
+    <div data-deactivation-toast className="border-b border-red-200 bg-red-50">
+      <div className="mx-auto max-w-5xl px-4 py-3">
+        <p className="text-sm font-medium text-red-800">
+          Your account has been turned off. Contact your store admin to be
+          reactivated.
+        </p>
       </div>
-    );
-  }
+    </div>
+  ) : null;
 
-  if (!authUser) return null;
+  if (!authUser) {
+    // Keep the banner visible after auto-sign-out so the user sees the
+    // explanation before the route guard redirects to /login.
+    return banner || null;
+  }
 
   const label =
     firestoreDisplayName ||
@@ -146,35 +157,38 @@ export default function AuthBar() {
     'Signed in';
 
   return (
-    <div data-auth-bar className="border-b border-gray-200 bg-gray-50">
-      <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-between gap-3">
-        <p className="text-sm text-gray-700 truncate">
-          Signed in as <span className="font-medium text-gray-900">{label}</span>
-        </p>
-        <div className="flex items-center gap-2">
-          {isAdminEmail(authUser.email) && authUser.emailVerified ? (
-            <Link
-              to="/staff"
-              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+    <>
+      {banner}
+      <div data-auth-bar className="border-b border-gray-200 bg-gray-50">
+        <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-between gap-3">
+          <p className="text-sm text-gray-700 truncate">
+            Signed in as <span className="font-medium text-gray-900">{label}</span>
+          </p>
+          <div className="flex items-center gap-2">
+            {isAdminEmail(authUser.email) && authUser.emailVerified ? (
+              <Link
+                to="/staff"
+                className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+              >
+                Staff
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={busy}
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
             >
-              Staff
-            </Link>
-          ) : null}
-          <button
-            type="button"
-            onClick={handleSignOut}
-            disabled={busy}
-            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
-          >
-            {busy ? 'Signing out…' : 'Sign out'}
-          </button>
+              {busy ? 'Signing out…' : 'Sign out'}
+            </button>
+          </div>
         </div>
+        {signOutError ? (
+          <div className="mx-auto max-w-5xl px-4 pb-2">
+            <p className="text-sm text-red-700">{signOutError}</p>
+          </div>
+        ) : null}
       </div>
-      {signOutError ? (
-        <div className="mx-auto max-w-5xl px-4 pb-2">
-          <p className="text-sm text-red-700">{signOutError}</p>
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }
