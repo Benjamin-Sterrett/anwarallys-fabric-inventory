@@ -92,8 +92,6 @@
 - ~~**PRJ-892**~~ — ✅ SHIPPED PR #50 (2026-04-27) — Write-side idempotency (Movement schema + Rules + boundary). Self-replay defense, safety-critical. PRJ-883 R9 owner_override comp action.
 - **~~PRJ-893~~** — Server-authoritative mount-time reads audit. **SHIPPED BY KIMI PR #34** (see Shipped). Was originally Claude-gated, but scope was smaller than expected (rolls-adjust already had server read; only staff.tsx + comments needed). Retaining in Claude-gate list for future tickets of this class.
 - **PRJ-888** — CI auto-deploy of Firestore Rules + indexes. Infra/CI, gated on Shaaiz minting an SA key.
-- **PRJ-796** — Soft-delete + 7-day retention. Rules-heavy, transactional, subtree-aware UI checks.
-- **PRJ-797** — Restore from `/deletedRecords`. Pairs with PRJ-796.
 - (none remaining in this section)
 
 ---
@@ -131,3 +129,5 @@
 Order: PRJ-914 → PRJ-916 → PRJ-917 → PRJ-913 → PRJ-915 → PRJ-911 → PRJ-912
 Update this list after each polish ticket ships.
 - [2026-04-28] PRJ-904 (PR #56 squash `084e41c`) — Remove 'Scaffold build' placeholder from header. 1 file, 1 deletion. Codex: clean prose, no VERDICT (known tooling issue).
+- [2026-04-27] PRJ-796 (PR #66 squash `c157898`) — Soft-delete items/folders + `/deleted` view. Rules: items tombstone in `/deletedRecords` with TTL, folders marked deleted in-place. Subtree-empty check before folder delete. 150 tests.
+- [2026-04-28] PRJ-797 (PR #67 squash `413abbb`) — Restore deleted items/folders within 7-day window. `restoreItem`/`restoreFolder` via `runTransaction`, parent-alive re-verify, expiry gating with fresh `Date.now()` click handlers. Rules: folders Transition 3 (deleted→active). 167 tests. Rules deployed.
