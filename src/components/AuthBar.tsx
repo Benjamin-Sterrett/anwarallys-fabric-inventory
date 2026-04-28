@@ -35,7 +35,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut, subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToUserByUid } from '@/lib/queries';
+import { subscribeToUserByUid, subscribeToAllActiveItems } from '@/lib/queries';
 import { isAdminEmail } from '@/lib/auth/isAdmin';
 
 type AuthState = FirebaseUser | null | undefined;
@@ -46,6 +46,7 @@ export default function AuthBar() {
   const [deactivated, setDeactivated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [lowStockCount, setLowStockCount] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -110,6 +111,25 @@ export default function AuthBar() {
     return unsub;
   }, [authUser]);
 
+  // Live low-stock badge count — updates reactively when stock changes.
+  useEffect(() => {
+    if (!authUser) {
+      setLowStockCount(0);
+      return;
+    }
+    const unsub = subscribeToAllActiveItems(
+      (items) => {
+        const count = items.filter((it) => it.remainingMeters <= it.minimumMeters).length;
+        setLowStockCount(count);
+      },
+      // Errors swallowed: a transient Firestore failure shouldn't break the bar.
+      () => {
+        setLowStockCount(0);
+      },
+    );
+    return unsub;
+  }, [authUser]);
+
   const handleSignOut = useCallback(async () => {
     // eslint-disable-next-line no-alert -- v1: simple confirm matches /staff page pattern.
     const ok = window.confirm(
@@ -168,6 +188,17 @@ export default function AuthBar() {
             Signed in as <span className="font-medium text-gray-900">{label}</span>
           </p>
           <div className="flex items-center gap-2">
+            <Link
+              to="/lowstock"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+            >
+              Low stock
+              {lowStockCount > 0 ? (
+                <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-bold text-white">
+                  {lowStockCount}
+                </span>
+              ) : null}
+            </Link>
             {isAdminEmail(authUser.email) && authUser.emailVerified ? (
               <Link
                 to="/staff"

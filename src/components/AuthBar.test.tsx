@@ -4,11 +4,12 @@ import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import AuthBar from './AuthBar';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToUserByUid } from '@/lib/queries';
+import { subscribeToUserByUid, subscribeToAllActiveItems } from '@/lib/queries';
 import { isAdminEmail } from '@/lib/auth/isAdmin';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
 const mockSubscribeToUserByUid = vi.hoisted(() => vi.fn());
+const mockSubscribeToAllActiveItems = vi.hoisted(() => vi.fn());
 const mockSignOut = vi.hoisted(() => vi.fn());
 const mockIsAdminEmail = vi.hoisted(() => vi.fn());
 
@@ -19,6 +20,7 @@ vi.mock('@/lib/firebase/auth', () => ({
 
 vi.mock('@/lib/queries', () => ({
   subscribeToUserByUid: mockSubscribeToUserByUid,
+  subscribeToAllActiveItems: mockSubscribeToAllActiveItems,
 }));
 
 vi.mock('@/lib/auth/isAdmin', () => ({
@@ -49,6 +51,7 @@ describe('AuthBar', () => {
       return vi.fn();
     });
     vi.mocked(subscribeToUserByUid).mockReturnValue(vi.fn());
+    vi.mocked(subscribeToAllActiveItems).mockReturnValue(vi.fn());
     vi.mocked(isAdminEmail).mockReturnValue(false);
   });
 
@@ -118,6 +121,84 @@ describe('AuthBar', () => {
     const staffLink = await screen.findByRole('link', { name: /staff/i });
     await user.click(staffLink);
     expect(staffLink).toHaveAttribute('href', '/staff');
+  });
+
+  it('renders Low stock link for signed-in users', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser());
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((_onNext) => vi.fn());
+
+    renderWithRouter();
+
+    const link = await screen.findByRole('link', { name: /low stock/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/lowstock');
+  });
+
+  it('does not render Low stock link when signed out', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(null);
+      return vi.fn();
+    });
+
+    renderWithRouter();
+
+    await waitFor(() => {
+      expect(screen.queryByRole('link', { name: /low stock/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('hides badge when low stock count is 0', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser());
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((onNext) => {
+      onNext([
+        { remainingMeters: 10, minimumMeters: 5 } as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+
+    renderWithRouter();
+
+    await screen.findByRole('link', { name: /low stock/i });
+    expect(screen.queryByText('1')).not.toBeInTheDocument();
+  });
+
+  it('shows badge when low stock count is > 0', async () => {
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser());
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((onNext) => {
+      onNext([
+        { remainingMeters: 3, minimumMeters: 5 } as import('@/lib/models').RollItem,
+        { remainingMeters: 10, minimumMeters: 5 } as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+
+    renderWithRouter();
+
+    await screen.findByRole('link', { name: /low stock/i });
+    expect(screen.getByText('1')).toBeInTheDocument();
+  });
+
+  it('renders both Low stock and Staff links for admin', async () => {
+    vi.mocked(isAdminEmail).mockReturnValue(true);
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => {
+      cb(fakeUser({ email: 'admin@fabric.local', emailVerified: true }));
+      return vi.fn();
+    });
+    vi.mocked(subscribeToAllActiveItems).mockImplementation((_onNext) => vi.fn());
+
+    renderWithRouter();
+
+    expect(await screen.findByRole('link', { name: /low stock/i })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /staff/i })).toBeInTheDocument();
   });
 
   describe('deactivation guard (PRJ-910)', () => {

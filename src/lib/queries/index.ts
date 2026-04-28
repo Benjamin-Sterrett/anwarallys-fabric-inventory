@@ -14,7 +14,7 @@ export {
 export {
   getItemById, getItemByIdFromServer, createItem, updateItem, listActiveItemsInFolder,
   listAllActiveItems,
-  subscribeToActiveItemsInFolder, getDeletedRecordById,
+  subscribeToActiveItemsInFolder, subscribeToAllActiveItems, getDeletedRecordById,
   type GetItemByIdOptions, type CreateItemParams, type UpdateItemParams,
 } from './items';
 export {
