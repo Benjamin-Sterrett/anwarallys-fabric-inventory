@@ -130,3 +130,4 @@
 ## Polish Bundle Queue (post-PRJ-904)
 Order: PRJ-914 → PRJ-916 → PRJ-917 → PRJ-913 → PRJ-915 → PRJ-911 → PRJ-912
 Update this list after each polish ticket ships.
+- [2026-04-28] PRJ-904 (PR #56 squash `084e41c`) — Remove 'Scaffold build' placeholder from header. 1 file, 1 deletion. Codex: clean prose, no VERDICT (known tooling issue).
