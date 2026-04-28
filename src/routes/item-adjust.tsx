@@ -340,12 +340,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
   }, [stopRepeat, stepBy]);
 
   const onTab = useCallback((next: Tab) => {
+    if (next === tab) return;
     setTab(next);
     setMetersInput('');
     setReason(null);
     setNote('');
     setSubmitError(null);
-  }, []);
+  }, [tab]);
 
   const onSavePressed = useCallback(() => {
     setSubmitError(null);
