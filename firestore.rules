@@ -487,8 +487,15 @@ service cloud.firestore {
         && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedAt == request.time
         && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedBy == request.auth.uid;
 
-      // Tombstones are immutable. TTL purges; no client deletes.
-      allow update, delete: if false;
+      // Tombstones are immutable. TTL purges; no client updates.
+      // PRJ-922: deletion is permitted ONLY when the matching items doc is
+      // being restored in the same transaction (deletedAt flips to null).
+      // This prevents orphaned tombstones that block re-delete.
+      allow update: if false;
+      allow delete: if isActiveStaff()
+        && exists(/databases/$(database)/documents/items/$(itemId))
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedAt == null
+        && getAfter(/databases/$(database)/documents/items/$(itemId)).data.deletedBy == null;
     }
 
     // /users — staff profile docs (PRJ-856). Writes admin-only.

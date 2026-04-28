@@ -227,8 +227,9 @@ export function subscribeToDeletedItems(
 
 /**
  * Restore a soft-deleted item. Flips delete metadata back to null on the
- * live `/items/{itemId}` doc; the tombstone in `/deletedRecords` is left
- * untouched for TTL purge.
+ * live `/items/{itemId}` doc AND deletes the matching `/deletedRecords/{itemId}`
+ * tombstone in the same transaction so the item can be re-deleted later
+ * (PRJ-922).
  *
  * Errors: `invalid-input`, `firestore/no-db`, `firestore/init-failed`,
  * `item-not-deleted`, `parent-deleted`, `firestore/<FirestoreErrorCode>`,
@@ -246,6 +247,7 @@ export async function restoreItem(
   const { db } = dbR;
 
   const itemRef = doc(db, 'items', itemId).withConverter(itemConverter);
+  const recordRef = doc(db, 'deletedRecords', itemId).withConverter(deletedRecordConverter);
 
   try {
     await runTransaction(db, async (tx) => {
@@ -267,6 +269,7 @@ export async function restoreItem(
         updatedAt: serverTimestamp(),
         updatedBy: actorUid,
       });
+      tx.delete(recordRef);
     });
     return ok(undefined);
   } catch (e) {
