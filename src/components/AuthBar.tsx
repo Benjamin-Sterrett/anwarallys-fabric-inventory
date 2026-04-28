@@ -17,16 +17,25 @@
 // (cached by uid); a real-time onSnapshot listener is overkill for a
 // label that changes via an admin self-service screen.
 //
+// ─── Deactivation guard (PRJ-910) ────────────────────────────────────────
+// AuthBar already subscribes to `/users/{uid}`, so it's the natural place
+// to detect `isActive == false`. When detected, we set a local `deactivated`
+// flag (persists even after sign-out so the toast survives the redirect),
+// render a one-time toast banner, and immediately call `signOut()`. The
+// real security boundary is still `isActiveStaff()` in Firestore Rules;
+// this guard only prevents the confusing "sign in then everything errors"
+// UX.
+//
 // ─── When the bar renders ────────────────────────────────────────────────
 // undefined / null → renders nothing. The route guard handles redirects;
 // there is no signed-out chrome to display.
 // User → renders the bar (with the displayName resolved as above).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { signOut, subscribeToAuthState } from '@/lib/firebase/auth';
-import { getUserByUid } from '@/lib/queries';
+import { subscribeToUserByUid } from '@/lib/queries';
 import { isAdminEmail } from '@/lib/auth/isAdmin';
 
 type AuthState = FirebaseUser | null | undefined;
@@ -34,6 +43,7 @@ type AuthState = FirebaseUser | null | undefined;
 export default function AuthBar() {
   const [authUser, setAuthUser] = useState<AuthState>(undefined);
   const [firestoreDisplayName, setFirestoreDisplayName] = useState<string | null>(null);
+  const [deactivated, setDeactivated] = useState(false);
   const [busy, setBusy] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -43,27 +53,61 @@ export default function AuthBar() {
     return unsub;
   }, []);
 
-  // Fetch the canonical displayName once per signed-in user. Errors are
-  // intentionally swallowed: the fallback chain still produces a usable
-  // label, and a transient Firestore failure shouldn't break the bar.
+  // Reset deactivation flag only when a NEW user signs in — NOT on sign-out.
+  // This keeps the toast visible after auto-sign-out so the user sees the
+  // explanation before the route guard redirects to /login.
+  const prevUidRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (authUser?.uid && authUser.uid !== prevUidRef.current) {
+      setDeactivated(false);
+      prevUidRef.current = authUser.uid;
+    }
+    if (!authUser) {
+      prevUidRef.current = undefined;
+    }
+  }, [authUser]);
+
+  // Subscribe to the canonical /users/{uid} doc for displayName AND
+  // deactivation state. The subscription lives for the lifetime of the
+  // signed-in session; an admin flipping `isActive` mid-task fires here
+  // within one snapshot round-trip.
   useEffect(() => {
     if (!authUser) {
       setFirestoreDisplayName(null);
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      const result = await getUserByUid(authUser.uid);
-      if (cancelled) return;
-      if (result.ok && result.data && result.data.displayName.trim()) {
-        setFirestoreDisplayName(result.data.displayName.trim());
-      } else {
+    const unsub = subscribeToUserByUid(
+      authUser.uid,
+      (user) => {
+        if (user && user.isActive === true) {
+          setDeactivated(false);
+        }
+        if (user && user.isActive === false) {
+          setDeactivated(true);
+          // Preserve admin recovery path: an inactive admin can still reach
+          // /staff to reactivate themselves (PRJ-874). Only non-admins are
+          // bounced automatically.
+          const isAdmin =
+            isAdminEmail(authUser.email ?? '') && authUser.emailVerified;
+          if (!isAdmin) {
+            void signOut();
+          }
+          return;
+        }
+        if (user && user.displayName.trim()) {
+          setFirestoreDisplayName(user.displayName.trim());
+        } else {
+          setFirestoreDisplayName(null);
+        }
+      },
+      // Errors are intentionally swallowed: the fallback chain still
+      // produces a usable label, and a transient Firestore failure
+      // shouldn't break the bar.
+      () => {
         setFirestoreDisplayName(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      },
+    );
+    return unsub;
   }, [authUser]);
 
   const handleSignOut = useCallback(async () => {
@@ -92,7 +136,22 @@ export default function AuthBar() {
     }
   }, [navigate]);
 
-  if (!authUser) return null;
+  const banner = deactivated ? (
+    <div data-deactivation-toast className="border-b border-red-200 bg-red-50">
+      <div className="mx-auto max-w-5xl px-4 py-3">
+        <p className="text-sm font-medium text-red-800">
+          Your account has been turned off. Contact your store admin to be
+          reactivated.
+        </p>
+      </div>
+    </div>
+  ) : null;
+
+  if (!authUser) {
+    // Keep the banner visible after auto-sign-out so the user sees the
+    // explanation before the route guard redirects to /login.
+    return banner || null;
+  }
 
   const label =
     firestoreDisplayName ||
@@ -101,35 +160,38 @@ export default function AuthBar() {
     'Signed in';
 
   return (
-    <div data-auth-bar className="border-b border-gray-200 bg-gray-50">
-      <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-between gap-3">
-        <p className="text-sm text-gray-700 truncate">
-          Signed in as <span className="font-medium text-gray-900">{label}</span>
-        </p>
-        <div className="flex items-center gap-2">
-          {isAdminEmail(authUser.email) && authUser.emailVerified ? (
-            <Link
-              to="/staff"
-              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+    <>
+      {banner}
+      <div data-auth-bar className="border-b border-gray-200 bg-gray-50">
+        <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-between gap-3">
+          <p className="text-sm text-gray-700 truncate">
+            Signed in as <span className="font-medium text-gray-900">{label}</span>
+          </p>
+          <div className="flex items-center gap-2">
+            {isAdminEmail(authUser.email) && authUser.emailVerified ? (
+              <Link
+                to="/staff"
+                className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+              >
+                Staff
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={busy}
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
             >
-              Staff
-            </Link>
-          ) : null}
-          <button
-            type="button"
-            onClick={handleSignOut}
-            disabled={busy}
-            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-800 disabled:opacity-50"
-          >
-            {busy ? 'Signing out…' : 'Sign out'}
-          </button>
+              {busy ? 'Signing out…' : 'Sign out'}
+            </button>
+          </div>
         </div>
+        {signOutError ? (
+          <div className="mx-auto max-w-5xl px-4 pb-2">
+            <p className="text-sm text-red-700">{signOutError}</p>
+          </div>
+        ) : null}
       </div>
-      {signOutError ? (
-        <div className="mx-auto max-w-5xl px-4 pb-2">
-          <p className="text-sm text-red-700">{signOutError}</p>
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }
