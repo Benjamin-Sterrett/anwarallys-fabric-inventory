@@ -53,7 +53,7 @@ describe('BackButton', () => {
     );
 
     await user.click(screen.getByRole('button', { name: /go back/i }));
-    expect(navigate).toHaveBeenCalledWith('/');
+    expect(navigate).toHaveBeenCalledWith('/', { replace: true });
 
     Object.defineProperty(window, 'history', {
       value: { ...window.history, state: originalState },

@@ -7,7 +7,7 @@ export default function BackButton({ fallbackTo }: { fallbackTo?: string }) {
       type="button"
       onClick={() => {
         if (fallbackTo && (window.history.state as { idx?: number } | null)?.idx === 0) {
-          navigate(fallbackTo);
+          navigate(fallbackTo, { replace: true });
         } else {
           navigate(-1);
         }
