@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { softDeleteItem } from '@/lib/queries';
 import { CREATE_UNDO_WINDOW_MS } from '@/lib/constants';
 import UndoSnackbar from './UndoSnackbar';
@@ -15,15 +15,22 @@ const REMOVED_TOAST_MS = 4_000;
 
 export default function CreateUndoSnackbar({ itemId, actorUid, onDismiss }: CreateUndoSnackbarProps) {
   const [phase, setPhase] = useState<Phase>('active');
+  const undoInflightRef = useRef(false);
 
   const handleUndo = useCallback(async () => {
     if (phase !== 'active') return;
+    if (undoInflightRef.current) return;
+    undoInflightRef.current = true;
     setPhase('undoing');
-    const r = await softDeleteItem(itemId, 'created-by-mistake', actorUid);
-    if (r.ok) {
-      setPhase('success');
-    } else {
-      setPhase('error');
+    try {
+      const r = await softDeleteItem(itemId, 'created-by-mistake', actorUid);
+      if (r.ok) {
+        setPhase('success');
+      } else {
+        setPhase('error');
+      }
+    } finally {
+      undoInflightRef.current = false;
     }
   }, [itemId, actorUid, phase]);
 
