@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
 import DeletedRoute from './deleted';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
-import { subscribeToDeletedItems, subscribeToDeletedFolders, subscribeToAllUsers, subscribeToAllFolders, restoreItem, restoreFolder } from '@/lib/queries';
+import { subscribeToDeletedItems, subscribeToDeletedFolders, subscribeToAllUsers, subscribeToAllFolders, restoreItem, restoreFolder, getUserByUid } from '@/lib/queries';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
 const mockSubscribeToDeletedItems = vi.hoisted(() => vi.fn());
@@ -14,6 +14,7 @@ const mockSubscribeToAllUsers = vi.hoisted(() => vi.fn());
 const mockSubscribeToAllFolders = vi.hoisted(() => vi.fn());
 const mockRestoreItem = vi.hoisted(() => vi.fn());
 const mockRestoreFolder = vi.hoisted(() => vi.fn());
+const mockGetUserByUid = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/firebase/auth', () => ({
   subscribeToAuthState: mockSubscribeToAuthState,
@@ -29,6 +30,7 @@ vi.mock('@/lib/queries', async () => {
     subscribeToAllFolders: mockSubscribeToAllFolders,
     restoreItem: mockRestoreItem,
     restoreFolder: mockRestoreFolder,
+    getUserByUid: mockGetUserByUid,
   };
 });
 
@@ -68,6 +70,7 @@ describe('DeletedRoute', () => {
     });
     vi.mocked(restoreItem).mockResolvedValue({ ok: true, data: undefined });
     vi.mocked(restoreFolder).mockResolvedValue({ ok: true, data: undefined });
+    vi.mocked(getUserByUid).mockResolvedValue({ ok: false, error: { code: 'firestore/permission-denied', message: 'No permission' } });
   });
 
   it('shows loading skeleton while auth resolves', async () => {
@@ -507,5 +510,85 @@ describe('DeletedRoute', () => {
     const parentText = screen.getByText(/Parent:/);
     expect(parentText.textContent).toBe('Parent: Main Room');
     expect(parentText.textContent).not.toMatch(/Main Room.*Main Room/);
+  });
+
+  it('falls back to per-uid lookup when bulk user list is empty (non-admin viewer) [PRJ-977]', async () => {
+    // Bulk list empty — simulates non-admin.
+    vi.mocked(subscribeToAllUsers).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+
+    // Viewer CAN read their own doc; others return permission-denied.
+    vi.mocked(getUserByUid).mockImplementation(async (uid: string) => {
+      if (uid === 'uid-1') {
+        return { ok: true, data: { uid: 'uid-1', displayName: 'Benjamin (smoke)', email: 'bens.hph@gmail.com', isActive: true, createdAt: { toMillis: () => 0 }, updatedAt: { toMillis: () => 0 }, createdBy: 'admin', updatedBy: 'admin' } as unknown as import('@/lib/models').User };
+      }
+      return { ok: false, error: { code: 'firestore/permission-denied', message: 'No permission' } };
+    });
+
+    vi.mocked(subscribeToDeletedItems).mockImplementation((onNext) => {
+      onNext([
+        {
+          itemId: 'item-1',
+          sku: 'SKU-001',
+          description: 'Red silk',
+          folderId: 'folder-1',
+          folderAncestors: [],
+          remainingMeters: 10,
+          lastMovementId: null,
+          initialMeters: 100,
+          minimumMeters: 5,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 3600_000),
+          deletedBy: 'uid-1',
+          deleteReason: 'Damaged',
+        } as unknown as import('@/lib/models').RollItem,
+        {
+          itemId: 'item-2',
+          sku: 'SKU-002',
+          description: 'Blue cotton',
+          folderId: 'folder-1',
+          folderAncestors: [],
+          remainingMeters: 5,
+          lastMovementId: null,
+          initialMeters: 50,
+          minimumMeters: 2,
+          photoUrl: null,
+          supplier: null,
+          price: null,
+          createdAt: { toMillis: () => 0 },
+          updatedAt: { toMillis: () => 0 },
+          createdBy: 'user-a',
+          updatedBy: 'user-a',
+          deletedAt: Timestamp.fromMillis(Date.now() - 7200_000),
+          deletedBy: 'user-b',
+          deleteReason: 'Expired',
+        } as unknown as import('@/lib/models').RollItem,
+      ]);
+      return vi.fn();
+    });
+    vi.mocked(subscribeToDeletedFolders).mockImplementation((onNext) => {
+      onNext([]);
+      return vi.fn();
+    });
+
+    renderRoute();
+
+    await waitFor(() => {
+      expect(screen.getByText('SKU-001')).toBeInTheDocument();
+    });
+
+    // Viewer's own deletions resolve to their displayName
+    expect(screen.getByText('Benjamin (smoke)')).toBeInTheDocument();
+
+    // Other actors fall back to friendly placeholder
+    expect(screen.getByText('Other staff')).toBeInTheDocument();
   });
 });
