@@ -22,6 +22,7 @@ import LowStockBadge from '@/components/LowStockBadge';
 import type { Folder, RollItem } from '@/lib/models';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import CreateUndoSnackbar from '@/components/CreateUndoSnackbar';
+import { CREATE_UNDO_WINDOW_MS } from '@/lib/constants';
 
 const SEARCH_DEPTH_MIN = 4;
 const BTN_PRIMARY =
@@ -370,7 +371,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
         const state = location.state as Record<string, unknown> | null;
         const lastCreatedItemId = state?.lastCreatedItemId as string | undefined;
         const createdAt = state?.createdAt as number | undefined;
-        if (lastCreatedItemId && createdAt && Date.now() - createdAt < 15_000 && authUser) {
+        if (lastCreatedItemId && createdAt && Date.now() - createdAt < CREATE_UNDO_WINDOW_MS && authUser) {
           return (
             <CreateUndoSnackbar
               itemId={lastCreatedItemId}
