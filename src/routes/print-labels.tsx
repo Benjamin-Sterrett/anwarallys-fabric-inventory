@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { listAllActiveItems } from '@/lib/queries';
 import type { RollItem } from '@/lib/models';
 import RollLabel from '@/components/RollLabel';
+import BackButton from '@/components/BackButton';
 
 const VALID_SIZES = ['default', 'small'] as const;
 type ValidSize = (typeof VALID_SIZES)[number];
@@ -55,6 +56,7 @@ export default function PrintLabelsRoute() {
   return (
     <section className="bg-white p-4 print:p-0">
       <div className="print-hide mb-4 flex flex-wrap items-center gap-3">
+        <BackButton fallbackTo="/" />
         <h1 className="text-lg font-semibold text-gray-900">Print labels</h1>
         <label className="flex items-center gap-2 text-sm text-gray-700">
           Size

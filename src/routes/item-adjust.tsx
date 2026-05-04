@@ -602,7 +602,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
-      <BackButton />
+      <BackButton fallbackTo="/" />
 
       {!online ? (
         <div className="sticky top-0 z-10 -mx-4 mb-3 bg-amber-100 px-4 py-2 text-sm text-amber-900">
