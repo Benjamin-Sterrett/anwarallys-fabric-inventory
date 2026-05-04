@@ -8,7 +8,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState,
   type CSSProperties, type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
@@ -16,6 +16,7 @@ import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFr
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
 import { randomUUIDv4 } from '@/lib/util/uuid';
 import ReasonChips, { reasonLabel } from '@/components/ReasonChips';
+import BackButton from '@/components/BackButton';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -201,7 +202,6 @@ function HoldToConfirm({ label, onConfirm, disabled }: { label: string; onConfir
 }
 
 function AdjustPage({ itemId }: { itemId: string }) {
-  const navigate = useNavigate();
   const online = useOnline();
 
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
@@ -607,6 +607,8 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
+      <BackButton />
+
       {!online ? (
         <div className="sticky top-0 z-10 -mx-4 mb-3 bg-amber-100 px-4 py-2 text-sm text-amber-900">
           You are offline. Save is disabled until you reconnect.
@@ -689,7 +691,6 @@ function AdjustPage({ itemId }: { itemId: string }) {
         ) : (
           <button type="button" onClick={onSavePressed} disabled={!saveEnabled} className={BTN_PRIMARY}>{saveLabel}</button>
         )}
-        <button type="button" onClick={() => navigate(-1)} className={BTN_SECONDARY}>Cancel</button>
       </div>
 
       {confirmOpen ? (

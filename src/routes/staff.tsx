@@ -32,6 +32,7 @@ import {
   renameStaffUser,
 } from '@/lib/queries';
 import type { User } from '@/lib/models';
+import BackButton from '@/components/BackButton';
 
 type AuthState = FirebaseUser | null | undefined;
 
@@ -387,6 +388,8 @@ function StaffManager({ adminUid, adminEmail }: StaffManagerProps) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
+      <BackButton />
+
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-gray-900">Staff</h1>
         <p className="mt-1 text-sm text-gray-700">

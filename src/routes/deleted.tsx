@@ -14,6 +14,7 @@ import {
   restoreFolder,
 } from '@/lib/queries';
 import type { RollItem, Folder, User } from '@/lib/models';
+import BackButton from '@/components/BackButton';
 
 function formatRelative(ts: Timestamp): string {
   const ms = ts.toMillis();
@@ -427,6 +428,8 @@ export default function DeletedRoute() {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
+      <BackButton />
+
       <h1 className="text-2xl font-semibold text-gray-900">Recently deleted</h1>
       <p className="mt-1 text-sm text-gray-600">Items and folders deleted in the last 7 days.</p>
 

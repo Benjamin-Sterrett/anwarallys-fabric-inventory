@@ -37,6 +37,7 @@ import type { Movement, RollItem } from '@/lib/models';
 import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import BackButton from '@/components/BackButton';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
@@ -294,6 +295,8 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
+      <BackButton />
+
       <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
 
       <header className="mt-3 mb-4">

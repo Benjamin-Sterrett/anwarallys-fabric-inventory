@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { changePassword, signOut } from '@/lib/firebase/auth';
+import BackButton from '@/components/BackButton';
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
 const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
@@ -60,6 +61,8 @@ export default function ChangePasswordRoute() {
 
   return (
     <section className="mx-auto max-w-md px-4 py-10">
+      <BackButton />
+
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h1 className="text-2xl font-semibold text-gray-900">Change password</h1>
         <p className="mt-1 text-sm text-gray-700">

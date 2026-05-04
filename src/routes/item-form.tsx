@@ -13,6 +13,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createItem, getFolderById, getItemById, updateItem } from '@/lib/queries';
 import type { Folder, RollItem } from '@/lib/models';
+import BackButton from '@/components/BackButton';
 
 /** Default low-stock threshold when the user leaves Minimum stock blank. */
 const DEFAULT_MIN_METERS = 10;
@@ -241,6 +242,8 @@ function ItemFormPage(props: ItemFormPageProps) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
+      <BackButton />
+
       <header className="mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">{headerTitle}</h1>
       </header>
@@ -285,7 +288,7 @@ function ItemFormPage(props: ItemFormPageProps) {
           <button type="submit" disabled={submitting} className={BTN_PRIMARY}>
             {submitting ? 'Saving…' : props.mode === 'create' ? 'Create item' : 'Save changes'}
           </button>
-          <Link to={cancelTarget} className={BTN_SECONDARY}>Cancel</Link>
+          <Link to={cancelTarget} className={BTN_SECONDARY}>Back</Link>
         </div>
       </form>
     </section>
