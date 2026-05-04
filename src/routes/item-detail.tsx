@@ -40,7 +40,6 @@ import { Breadcrumbs } from '@/components/Breadcrumbs';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
-const UNDO_WINDOW_MS = 15_000;
 const HISTORY_PAGE_SIZE = 50;
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
@@ -82,13 +81,14 @@ function formatRelative(at: unknown, now: number): string {
   if (ms === null) return '';
   const delta = Math.max(0, now - ms);
   const sec = Math.round(delta / 1000);
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 60) return 'just now';
   const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  return `${day}d ago`;
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return 'yesterday';
+  return `${day} days ago`;
 }
 
 // Inline subset of item-adjust.tsx mapErrorCode — only the codes the
@@ -199,16 +199,8 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
     if (item === null || item === undefined) return false;
     if (item.lastMovementId !== lastMovement.movementId) return false;
     if (item.remainingMeters !== lastMovement.newMeters) return false;
-    const ms = timestampMillis(lastMovement.at);
-    if (ms === null) return false;
-    // Clamp future-stamped movements (device clock behind Firestore) to age=0.
-    // Without the clamp, a negative age passes <= UNDO_WINDOW_MS and the Undo
-    // button stays visible forever. Server rule check (PRJ-890) is the real
-    // safety net; this is UX. Clock-ahead case (window closes early) is UX
-    // inconvenience only — server rejection prevents actual harm.
-    const ageMs = Math.max(0, now - ms);
-    return ageMs <= UNDO_WINDOW_MS;
-  }, [lastMovement, item, now]);
+    return true;
+  }, [lastMovement, item]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -414,7 +406,9 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
               disabled={submitting}
               className={BTN_PRIMARY}
             >
-              {submitting ? 'Undoing…' : 'Undo this change'}
+              {submitting
+                ? 'Undoing…'
+                : `Undo: ${formatDelta(lastMovement.deltaMeters)} ${reasonLabel(lastMovement.reason).toLowerCase()} by ${lastMovement.actorName}, ${formatRelative(lastMovement.at, now)}`}
             </button>
           </div>
         </div>

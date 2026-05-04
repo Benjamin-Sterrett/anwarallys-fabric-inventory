@@ -10,11 +10,11 @@ import {
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { Timestamp } from 'firebase/firestore';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createMovementAndAdjustItem, findMovementByCorrelationId, getItemByIdFromServer, getUserByUid } from '@/lib/queries';
 import type { Movement, MovementReason, RollItem, User } from '@/lib/models';
 import { randomUUIDv4 } from '@/lib/util/uuid';
+import { SNACKBAR_DISMISS_MS } from '@/lib/constants';
 import ReasonChips, { reasonLabel } from '@/components/ReasonChips';
 
 const HOLD_MS = 800;
@@ -24,7 +24,6 @@ const STEP_NUDGE = 0.5;
 const NOTE_MAX = 200;
 const NOTE_MIN_OTHER = 3;
 const SAVE_TIMEOUT_MS = 10_000;
-const UNDO_WINDOW_MS = 15_000;
 // PRJ-883: timeout reconciliation. After a `Promise.race` timeout fires,
 // the underlying transaction may still be in flight server-side. Poll
 // `/movements` for the correlation id; first probe is immediate, then
@@ -287,7 +286,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   useEffect(() => {
     if (!lastMovement) return;
-    const t = window.setTimeout(() => { setLastMovement(null); setSnack(null); }, UNDO_WINDOW_MS);
+    const t = window.setTimeout(() => { setLastMovement(null); setSnack(null); }, SNACKBAR_DISMISS_MS);
     return () => window.clearTimeout(t);
   }, [lastMovement]);
 
@@ -408,11 +407,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
         if (lookup.ok && lookup.data) {
           const m = lookup.data;
           setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
-          // Only grant Undo if the movement is still within the 15-sec window.
-          const movementTime = m.at instanceof Timestamp ? m.at.toMillis() : Date.now();
-          if (Date.now() - movementTime < UNDO_WINDOW_MS) {
-            setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
-          }
+          // Grant Undo unconditionally — the snackbar timer (SNACKBAR_DISMISS_MS)
+          // handles the UI lifecycle. The movement was created by the current
+          // action; network delay does not change user intent.
+          setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
           setSubmitting(false);
@@ -442,7 +440,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       if (r.error.code === 'timeout') {
         const outcome = await reconcileTimedOutSave(item.itemId, correlationId, authUser.uid);
         if (outcome.kind === 'found') {
-          // Late-success path — restore the 15-sec Undo window. Use the
+          // Late-success path — restore the snackbar Undo window. Use the
           // server-authoritative movement values (oldMeters/newMeters/
           // movementId), NOT the client request, so a query hit can
           // never mislead the Undo math.
@@ -453,15 +451,12 @@ function AdjustPage({ itemId }: { itemId: string }) {
           // is gone (R6 design simplification), so the refresh is
           // unnecessary. It was also masking the snackbar/Undo
           // affordance during the refetch (reloadItemFromServer sets
-          // item to undefined), which could swallow the 15-sec Undo
+          // item to undefined), which could swallow the Undo
           // window on slow networks.
           const m = outcome.movement;
           setItem((cur) => cur ? { ...cur, remainingMeters: m.newMeters, lastMovementId: m.movementId } : cur);
-          // Only grant Undo if the movement is still within the 15-sec window.
-          const movementTime = m.at instanceof Timestamp ? m.at.toMillis() : Date.now();
-          if (Date.now() - movementTime < UNDO_WINDOW_MS) {
-            setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
-          }
+          // Grant Undo unconditionally — the snackbar timer handles UI lifecycle.
+          setLastMovement({ movementId: m.movementId, oldMeters: m.oldMeters, newMeters: m.newMeters });
           setSnack(`Saved: ${formatMeters(m.oldMeters)} → ${formatMeters(m.newMeters)}`);
           setMetersInput(''); setReason(null); setNote('');
           setSubmitting(false);
