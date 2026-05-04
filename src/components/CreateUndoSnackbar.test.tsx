@@ -139,4 +139,26 @@ describe('CreateUndoSnackbar', () => {
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute('href', '/deleted');
   });
+
+  it('sync double-click fires only one softDeleteItem call [PRJ-980]', async () => {
+    mockSoftDeleteItem.mockResolvedValue({ ok: true, data: undefined });
+
+    render(
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const undoBtn = screen.getByRole('button', { name: /undo/i });
+    // Synchronous double-fire — before React re-renders to disabled state.
+    undoBtn.click();
+    undoBtn.click();
+
+    await waitFor(() => {
+      expect(screen.getByText('Removed.')).toBeInTheDocument();
+    });
+
+    // Ref guard should block the second invocation.
+    expect(mockSoftDeleteItem).toHaveBeenCalledTimes(1);
+  });
 });

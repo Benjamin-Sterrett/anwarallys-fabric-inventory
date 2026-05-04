@@ -502,51 +502,59 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setPendingCorrelationId(null);
   }, [item, authUser, userDoc, targetNewMeters, reason, noteTrimmed, reloadItemFromServer, pendingCorrelationId]);
 
+  const undoInflightRef = useRef(false);
+
   const onUndo = useCallback(async () => {
     if (!lastMovement || !authUser || !userDoc || !item) return;
-    setSubmitting(true);
-    // Re-fetch userDoc fresh (R6 P2 — same reason as onConfirm).
-    const freshUser = await getUserByUid(authUser.uid);
-    if (!freshUser.ok || !freshUser.data) {
+    if (undoInflightRef.current) return;
+    undoInflightRef.current = true;
+    try {
+      setSubmitting(true);
+      // Re-fetch userDoc fresh (R6 P2 — same reason as onConfirm).
+      const freshUser = await getUserByUid(authUser.uid);
+      if (!freshUser.ok || !freshUser.data) {
+        setSubmitting(false);
+        setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
+        return;
+      }
+      setUserDoc(freshUser.data);
+      // Boundary's optimistic concurrency guard rejects with `meters-mismatch`
+      // if another adjustment ran in the gap. Undo issues a NEW reverse
+      // transaction with reason `correction` — audit trail is preserved.
+      const r = await createMovementAndAdjustItem({
+        itemId: item.itemId,
+        expectedOldMeters: item.remainingMeters,
+        newMeters: lastMovement.oldMeters,
+        reason: 'correction',
+        // PRJ-890: typed back-reference replaces the prior locale-fragile
+        // `note: "Undo of <id>"` convention. `note` stays user-typed
+        // free-form (null on undo — staff didn't type anything).
+        note: null,
+        actorUid: authUser.uid,
+        actorName: freshUser.data.displayName,
+        reversesMovementId: lastMovement.movementId,
+      });
       setSubmitting(false);
-      setSubmitError('Could not verify your staff profile. Sign out and back in, then try again.');
-      return;
-    }
-    setUserDoc(freshUser.data);
-    // Boundary's optimistic concurrency guard rejects with `meters-mismatch`
-    // if another adjustment ran in the gap. Undo issues a NEW reverse
-    // transaction with reason `correction` — audit trail is preserved.
-    const r = await createMovementAndAdjustItem({
-      itemId: item.itemId,
-      expectedOldMeters: item.remainingMeters,
-      newMeters: lastMovement.oldMeters,
-      reason: 'correction',
-      // PRJ-890: typed back-reference replaces the prior locale-fragile
-      // `note: "Undo of <id>"` convention. `note` stays user-typed
-      // free-form (null on undo — staff didn't type anything).
-      note: null,
-      actorUid: authUser.uid,
-      actorName: freshUser.data.displayName,
-      reversesMovementId: lastMovement.movementId,
-    });
-    setSubmitting(false);
-    if (!r.ok) {
+      if (!r.ok) {
+        setLastMovement(null);
+        setSnack(null);
+        setSubmitError(`Could not undo: ${mapErrorCode(r.error.code, r.error.message)}`);
+        return;
+      }
+      // Same in-place update pattern as onConfirm — avoid the unmount race.
+      // R6: no post-undo `reloadItemFromServer()` (R6 design simplification —
+      // see onConfirm comments). The boundary returns server-authoritative
+      // values; nothing else needs refreshing.
+      setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
+      // State ordering fix [PRJ-907]: setSnack must come before setLastMovement(null).
+      // If lastMovement becomes null first, the snack-only auto-dismiss effect sees
+      // the stale "Saved: X → Y" snack and schedules a 4s clear, racing React 19
+      // batching and potentially hiding the "Undone." message immediately.
+      setSnack('Undone.');
       setLastMovement(null);
-      setSnack(null);
-      setSubmitError(`Could not undo: ${mapErrorCode(r.error.code, r.error.message)}`);
-      return;
+    } finally {
+      undoInflightRef.current = false;
     }
-    // Same in-place update pattern as onConfirm — avoid the unmount race.
-    // R6: no post-undo `reloadItemFromServer()` (R6 design simplification —
-    // see onConfirm comments). The boundary returns server-authoritative
-    // values; nothing else needs refreshing.
-    setItem((cur) => cur ? { ...cur, remainingMeters: r.data.newMeters, lastMovementId: r.data.movementId } : cur);
-    // State ordering fix [PRJ-907]: setSnack must come before setLastMovement(null).
-    // If lastMovement becomes null first, the snack-only auto-dismiss effect sees
-    // the stale "Saved: X → Y" snack and schedules a 4s clear, racing React 19
-    // batching and potentially hiding the "Undone." message immediately.
-    setSnack('Undone.');
-    setLastMovement(null);
   }, [lastMovement, authUser, userDoc, item]);
 
   if (authUser === undefined || item === undefined || userDoc === undefined) {
