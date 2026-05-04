@@ -287,7 +287,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
 
   return (
     <section className="mx-auto max-w-2xl px-4 py-6">
-      <BackButton />
+      <BackButton fallbackTo="/" />
 
       <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
 

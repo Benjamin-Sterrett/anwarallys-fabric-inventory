@@ -33,4 +33,60 @@ describe('BackButton', () => {
     await user.click(screen.getByRole('button', { name: /go back/i }));
     expect(navigate).toHaveBeenCalledWith(-1);
   });
+
+  it('navigates to fallbackTo when history.state.idx === 0', async () => {
+    const navigate = vi.fn();
+    vi.mocked(useNavigate).mockReturnValue(navigate);
+    const user = userEvent.setup();
+
+    const originalState = window.history.state;
+    Object.defineProperty(window, 'history', {
+      value: { ...window.history, state: { idx: 0 } },
+      writable: true,
+      configurable: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <BackButton fallbackTo="/" />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: /go back/i }));
+    expect(navigate).toHaveBeenCalledWith('/', { replace: true });
+
+    Object.defineProperty(window, 'history', {
+      value: { ...window.history, state: originalState },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it('calls navigate(-1) when history.state.idx > 0 even with fallbackTo', async () => {
+    const navigate = vi.fn();
+    vi.mocked(useNavigate).mockReturnValue(navigate);
+    const user = userEvent.setup();
+
+    const originalState = window.history.state;
+    Object.defineProperty(window, 'history', {
+      value: { ...window.history, state: { idx: 1 } },
+      writable: true,
+      configurable: true,
+    });
+
+    render(
+      <MemoryRouter>
+        <BackButton fallbackTo="/" />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole('button', { name: /go back/i }));
+    expect(navigate).toHaveBeenCalledWith(-1);
+
+    Object.defineProperty(window, 'history', {
+      value: { ...window.history, state: originalState },
+      writable: true,
+      configurable: true,
+    });
+  });
 });
