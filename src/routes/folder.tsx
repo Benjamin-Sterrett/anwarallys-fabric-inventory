@@ -21,6 +21,7 @@ import {
 import LowStockBadge from '@/components/LowStockBadge';
 import type { Folder, RollItem } from '@/lib/models';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import BackButton from '@/components/BackButton';
 
 const SEARCH_DEPTH_MIN = 4;
 const BTN_PRIMARY =
@@ -363,6 +364,8 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   return (
     <section className="mx-auto max-w-2xl px-4 py-8">
       <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
+      <BackButton />
+
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">
           {parentId === null ? 'Home' : currentFolder?.name ?? ''}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAllActiveItems } from '@/lib/queries';
 import type { RollItem } from '@/lib/models';
+import BackButton from '@/components/BackButton';
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
 const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
@@ -73,6 +74,8 @@ export default function LowStockRoute() {
   if (totalCount === 0) {
     return (
       <section className="mx-auto max-w-5xl px-4 py-6">
+        <BackButton />
+
         <h1 className="text-xl font-semibold text-gray-900">Low stock</h1>
         <div className="mt-4 rounded-lg border border-gray-200 bg-white p-6 text-center">
           <p className="text-sm text-gray-700">No active items in inventory yet.</p>
@@ -94,6 +97,8 @@ export default function LowStockRoute() {
 
   return (
     <section className="mx-auto max-w-5xl px-4 py-6">
+      <BackButton />
+
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">Low stock</h1>
         <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">
