@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import CreateUndoSnackbar from './CreateUndoSnackbar';
 
@@ -24,7 +25,9 @@ describe('CreateUndoSnackbar', () => {
 
   it('renders snackbar with item created message', () => {
     render(
-      <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />,
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />
+      </MemoryRouter>,
     );
     expect(screen.getByText('Item created.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /undo/i })).toBeInTheDocument();
@@ -35,7 +38,9 @@ describe('CreateUndoSnackbar', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
 
     render(
-      <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />,
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />
+      </MemoryRouter>,
     );
 
     await user.click(screen.getByRole('button', { name: /undo/i }));
@@ -45,7 +50,9 @@ describe('CreateUndoSnackbar', () => {
   it('15-sec timer dismisses snackbar', () => {
     const onDismiss = vi.fn();
     render(
-      <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />,
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />
+      </MemoryRouter>,
     );
 
     vi.advanceTimersByTime(CREATE_UNDO_SNACKBAR_MS);
@@ -58,7 +65,9 @@ describe('CreateUndoSnackbar', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
 
     render(
-      <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />,
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />
+      </MemoryRouter>,
     );
 
     await user.click(screen.getByRole('button', { name: /undo/i }));
@@ -79,7 +88,9 @@ describe('CreateUndoSnackbar', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
 
     render(
-      <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />,
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />
+      </MemoryRouter>,
     );
 
     await user.click(screen.getByRole('button', { name: /undo/i }));
@@ -90,5 +101,42 @@ describe('CreateUndoSnackbar', () => {
     // Should still dismiss via the 15s timer.
     vi.advanceTimersByTime(CREATE_UNDO_SNACKBAR_MS);
     expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('close (X) button dismisses snackbar immediately', async () => {
+    const onDismiss = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+
+    render(
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={onDismiss} />
+      </MemoryRouter>,
+    );
+
+    const closeBtn = screen.getByRole('button', { name: /dismiss/i });
+    expect(closeBtn).toBeInTheDocument();
+
+    await user.click(closeBtn);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows View deleted items link in Removed phase', async () => {
+    mockSoftDeleteItem.mockResolvedValue({ ok: true, data: undefined });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+
+    render(
+      <MemoryRouter>
+        <CreateUndoSnackbar itemId="item-1" actorUid="actor-1" onDismiss={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: /undo/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Removed.')).toBeInTheDocument();
+    });
+
+    const link = screen.getByRole('link', { name: /view deleted items/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('href', '/deleted');
   });
 });
