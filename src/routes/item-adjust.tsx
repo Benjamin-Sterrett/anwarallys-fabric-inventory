@@ -17,6 +17,7 @@ import { randomUUIDv4 } from '@/lib/util/uuid';
 import { SNACKBAR_DISMISS_MS } from '@/lib/constants';
 import ReasonChips, { reasonLabel } from '@/components/ReasonChips';
 import BackButton from '@/components/BackButton';
+import UndoSnackbar from '@/components/UndoSnackbar';
 
 const HOLD_MS = 800;
 const STEP_DELAY_MS = 500;
@@ -284,18 +285,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
   type SaveState = 'idle' | 'submitting' | 'inconclusive' | 'late-success' | 'error';
   const [saveState, setSaveState] = useState<SaveState>('idle');
 
-  useEffect(() => {
-    if (!lastMovement) return;
-    const t = window.setTimeout(() => { setLastMovement(null); setSnack(null); }, SNACKBAR_DISMISS_MS);
-    return () => window.clearTimeout(t);
-  }, [lastMovement]);
 
-  // Snack-only auto-dismiss (R1 P3) — covers post-undo "Undone." banner.
-  useEffect(() => {
-    if (!snack || lastMovement) return;
-    const t = window.setTimeout(() => setSnack(null), 4000);
-    return () => window.clearTimeout(t);
-  }, [snack, lastMovement]);
 
   const repeatRef = useRef<{ delay: number | null; interval: number | null }>({ delay: null, interval: null });
   const stopRepeat = useCallback(() => {
@@ -714,15 +704,14 @@ function AdjustPage({ itemId }: { itemId: string }) {
       ) : null}
 
       {snack ? (
-        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 transform" role="status">
-          <div className="flex items-center gap-3 rounded-md bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
-            <span>{snack}</span>
-            {lastMovement ? (
-              <button type="button" onClick={() => { void onUndo(); }} disabled={submitting}
-                className="rounded border border-white/30 px-2 py-0.5 text-xs">Undo</button>
-            ) : null}
-          </div>
-        </div>
+        <UndoSnackbar
+          text={snack}
+          phase={submitting && lastMovement ? 'undoing' : (lastMovement ? 'active' : 'success')}
+          onDismiss={lastMovement ? () => { setLastMovement(null); setSnack(null); } : () => setSnack(null)}
+          dismissMs={lastMovement ? SNACKBAR_DISMISS_MS : 4_000}
+          onUndo={lastMovement ? onUndo : undefined}
+          successText="Undone."
+        />
       ) : null}
     </section>
   );
