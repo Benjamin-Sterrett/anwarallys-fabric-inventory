@@ -182,12 +182,11 @@ function ItemFormPage(props: ItemFormPageProps) {
     const photoUrl = trimOrNull(form.photoUrl);
 
     setSubmitting(true);
-    let r;
     if (props.mode === 'create') {
       if (!folder) { setSubmitting(false); setSubmitError('Folder not loaded.'); return; }
       const initParse = parseNum(form.initialMeters, 'Original length', 'required-positive');
       if (!initParse.ok) { setSubmitting(false); setSubmitError(initParse.message); return; }
-      r = await createItem({
+      const createR = await createItem({
         folderId: folder.folderId,
         // folderAncestors = parent.ancestors ++ [parent.folderId] — rules re-derive.
         folderAncestors: [...folder.ancestors, folder.folderId],
@@ -195,16 +194,21 @@ function ItemFormPage(props: ItemFormPageProps) {
         initialMeters: initParse.value ?? 0, // required-positive never returns null
         minimumMeters, supplier, price, photoUrl, actorUid: authUser.uid,
       });
-    } else {
-      if (!item) { setSubmitting(false); setSubmitError('Item not loaded.'); return; }
-      r = await updateItem({
-        itemId: item.itemId, sku: trimmedSku, description: form.description,
-        supplier, price, minimumMeters, photoUrl, actorUid: authUser.uid,
+      setSubmitting(false);
+      if (!createR.ok) { setSubmitError(`Could not save item: ${createR.error.message} (${createR.error.code})`); return; }
+      navigate(`/folders/${folder.folderId}`, {
+        state: { lastCreatedItemId: createR.data.itemId, createdAt: Date.now() },
       });
+      return;
     }
+    if (!item) { setSubmitting(false); setSubmitError('Item not loaded.'); return; }
+    const r = await updateItem({
+      itemId: item.itemId, sku: trimmedSku, description: form.description,
+      supplier, price, minimumMeters, photoUrl, actorUid: authUser.uid,
+    });
     setSubmitting(false);
     if (!r.ok) { setSubmitError(`Could not save item: ${r.error.message} (${r.error.code})`); return; }
-    navigate(`/folders/${props.mode === 'create' ? folder!.folderId : item!.folderId}`);
+    navigate(`/folders/${item.folderId}`);
   }, [authUser, form, folder, item, props.mode, navigate]);
 
   if (authUser === undefined || (!loadError && !hydrated)) {

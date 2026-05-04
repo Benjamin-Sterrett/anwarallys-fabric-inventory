@@ -6,7 +6,7 @@
 // same-device creates instantly (no optimistic UI). ESL + mobile-first.
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import {
@@ -21,6 +21,7 @@ import {
 import LowStockBadge from '@/components/LowStockBadge';
 import type { Folder, RollItem } from '@/lib/models';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import CreateUndoSnackbar from '@/components/CreateUndoSnackbar';
 import BackButton from '@/components/BackButton';
 
 const SEARCH_DEPTH_MIN = 4;
@@ -159,6 +160,7 @@ function Skeleton() {
 }
 export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
 
@@ -365,6 +367,22 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
     <section className="mx-auto max-w-2xl px-4 py-8">
       <Breadcrumbs items={breadcrumbEntries.map((e) => ({ label: e.name ?? 'Home', to: e.folderId === '' ? '/' : `/folders/${e.folderId}` }))} />
       <BackButton />
+
+      {(() => {
+        const state = location.state as Record<string, unknown> | null;
+        const lastCreatedItemId = state?.lastCreatedItemId as string | undefined;
+        const createdAt = state?.createdAt as number | undefined;
+        if (lastCreatedItemId && createdAt && Date.now() - createdAt < 15_000 && authUser) {
+          return (
+            <CreateUndoSnackbar
+              itemId={lastCreatedItemId}
+              actorUid={authUser.uid}
+              onDismiss={() => navigate('.', { replace: true, state: {} })}
+            />
+          );
+        }
+        return null;
+      })()}
 
       <header className="mt-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900">
