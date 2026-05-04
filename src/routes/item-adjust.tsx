@@ -706,7 +706,7 @@ function AdjustPage({ itemId }: { itemId: string }) {
       {snack ? (
         <UndoSnackbar
           text={snack}
-          phase={lastMovement ? 'active' : 'success'}
+          phase={submitting && lastMovement ? 'undoing' : (lastMovement ? 'active' : 'success')}
           onDismiss={lastMovement ? () => { setLastMovement(null); setSnack(null); } : () => setSnack(null)}
           dismissMs={lastMovement ? SNACKBAR_DISMISS_MS : 4_000}
           onUndo={lastMovement ? onUndo : undefined}
