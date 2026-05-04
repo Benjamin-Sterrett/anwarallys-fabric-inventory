@@ -34,14 +34,14 @@ describe('BackButton', () => {
     expect(navigate).toHaveBeenCalledWith(-1);
   });
 
-  it('navigates to fallbackTo when history.length <= 1', async () => {
+  it('navigates to fallbackTo when history.state.idx === 0', async () => {
     const navigate = vi.fn();
     vi.mocked(useNavigate).mockReturnValue(navigate);
     const user = userEvent.setup();
 
-    const originalLength = window.history.length;
+    const originalState = window.history.state;
     Object.defineProperty(window, 'history', {
-      value: { ...window.history, length: 1 },
+      value: { ...window.history, state: { idx: 0 } },
       writable: true,
       configurable: true,
     });
@@ -56,20 +56,20 @@ describe('BackButton', () => {
     expect(navigate).toHaveBeenCalledWith('/');
 
     Object.defineProperty(window, 'history', {
-      value: { ...window.history, length: originalLength },
+      value: { ...window.history, state: originalState },
       writable: true,
       configurable: true,
     });
   });
 
-  it('calls navigate(-1) when history.length > 1 even with fallbackTo', async () => {
+  it('calls navigate(-1) when history.state.idx > 0 even with fallbackTo', async () => {
     const navigate = vi.fn();
     vi.mocked(useNavigate).mockReturnValue(navigate);
     const user = userEvent.setup();
 
-    const originalLength = window.history.length;
+    const originalState = window.history.state;
     Object.defineProperty(window, 'history', {
-      value: { ...window.history, length: 2 },
+      value: { ...window.history, state: { idx: 1 } },
       writable: true,
       configurable: true,
     });
@@ -84,7 +84,7 @@ describe('BackButton', () => {
     expect(navigate).toHaveBeenCalledWith(-1);
 
     Object.defineProperty(window, 'history', {
-      value: { ...window.history, length: originalLength },
+      value: { ...window.history, state: originalState },
       writable: true,
       configurable: true,
     });

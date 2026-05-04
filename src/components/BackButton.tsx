@@ -6,7 +6,7 @@ export default function BackButton({ fallbackTo }: { fallbackTo?: string }) {
     <button
       type="button"
       onClick={() => {
-        if (fallbackTo && window.history.length <= 1) {
+        if (fallbackTo && (window.history.state as { idx?: number } | null)?.idx === 0) {
           navigate(fallbackTo);
         } else {
           navigate(-1);
