@@ -12,6 +12,7 @@ import {
   subscribeToAllFolders,
   restoreItem,
   restoreFolder,
+  getUserByUid,
 } from '@/lib/queries';
 import type { RollItem, Folder, User } from '@/lib/models';
 import BackButton from '@/components/BackButton';
@@ -292,6 +293,44 @@ export default function DeletedRoute() {
     );
   }, [authUser]);
 
+  // Non-admin fallback: bulk /users list is admin-gated. When the list is
+  // empty, resolve each unique deletedBy UID individually. Any authed user
+  // can read their own /users/{uid} doc per Rules; other actors return
+  // permission-denied and fall back to a friendly placeholder.
+  const [fallbackNames, setFallbackNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (authUser === undefined) return;
+    if (users && users.length > 0) return;
+    const allDeletedBy = new Set<string>();
+    if (items) {
+      for (const item of items) {
+        if (item.deletedBy) allDeletedBy.add(item.deletedBy);
+      }
+    }
+    if (folders) {
+      for (const folder of folders) {
+        if (folder.deletedBy) allDeletedBy.add(folder.deletedBy);
+      }
+    }
+    if (allDeletedBy.size === 0) return;
+
+    let cancelled = false;
+    async function resolve() {
+      const map = new Map<string, string>();
+      for (const uid of allDeletedBy) {
+        const r = await getUserByUid(uid);
+        if (!cancelled && r.ok && r.data) {
+          map.set(uid, r.data.displayName);
+        } else if (!cancelled) {
+          map.set(uid, 'Other staff');
+        }
+      }
+      if (!cancelled) setFallbackNames(map);
+    }
+    void resolve();
+    return () => { cancelled = true; };
+  }, [authUser, users, items, folders]);
+
   const [allFolders, setAllFolders] = useState<Folder[] | undefined>(undefined);
   useEffect(() => {
     if (authUser === undefined) return;
@@ -308,8 +347,11 @@ export default function DeletedRoute() {
         map.set(u.uid, u.displayName);
       }
     }
+    for (const [uid, name] of fallbackNames) {
+      if (!map.has(uid)) map.set(uid, name);
+    }
     return map;
-  }, [users]);
+  }, [users, fallbackNames]);
 
   const folderNameMap = useMemo(() => {
     const map = new Map<string, string>();
