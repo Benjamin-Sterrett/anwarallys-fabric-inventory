@@ -43,7 +43,9 @@ export default function FindRoute() {
     void listAllActiveItems().then((r) => {
       if (cancelled) return;
       if (!r.ok) {
-        setLoadState({ kind: 'error', message: `Could not load items: ${r.error.message} (${r.error.code})` });
+        // Generic, user-friendly message — don't surface internal Firestore
+        // error codes/messages to non-technical shop staff (DeepSeek review).
+        setLoadState({ kind: 'error', message: 'Could not load items. Check your connection and try again.' });
         return;
       }
       setLoadState({ kind: 'ready', items: r.data });
