@@ -189,6 +189,12 @@ export default function AuthBar() {
           </p>
           <div className="flex items-center gap-2">
             <Link
+              to="/find"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
+            >
+              Find
+            </Link>
+            <Link
               to="/lowstock"
               className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-600"
             >
