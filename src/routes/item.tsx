@@ -6,6 +6,7 @@ import { getFolderById, getItemById, getItemByIdFromServer } from '@/lib/queries
 import type { RollItem } from '@/lib/models';
 import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
+import RecentHistory from '@/components/RecentHistory';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
@@ -248,6 +249,8 @@ function ItemPage({ itemId }: { itemId: string }) {
         <Link to={`/items/${item.itemId}`} className={BTN_SECONDARY}>View history</Link>
         <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print QR</Link>
       </div>
+
+      <RecentHistory itemId={item.itemId} />
     </section>
   );
 }
