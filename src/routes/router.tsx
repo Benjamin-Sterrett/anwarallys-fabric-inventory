@@ -10,6 +10,7 @@ import ItemAdjustRoute from './item-adjust';
 import FolderRoute from './folder';
 import DeletedRoute from './deleted';
 import LowStockRoute from './lowstock';
+import FindRoute from './find';
 import NotFoundRoute from './not-found';
 import StaffRoute from './staff';
 import PrintLabelRoute from './print-label';
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
       { path: 'items/:itemId/edit', element: <RequireAuth><ItemEditRoute /></RequireAuth> },
       { path: 'deleted', element: <RequireAuth><DeletedRoute /></RequireAuth> },
       { path: 'lowstock', element: <RequireAuth><LowStockRoute /></RequireAuth> },
+      { path: 'find', element: <RequireAuth><FindRoute /></RequireAuth> },
       { path: 'staff', element: <RequireAdmin><StaffRoute /></RequireAdmin> },
       { path: 'print/label/:itemId', element: <RequireAuth><PrintLabelRoute /></RequireAuth> },
       { path: 'print/labels', element: <RequireAuth><PrintLabelsRoute /></RequireAuth> },
