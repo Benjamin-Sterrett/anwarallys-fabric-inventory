@@ -13,6 +13,13 @@
 // can't (rather than silently storing an over-limit string the write would
 // reject).
 
+/**
+ * The exact data-URI prefix this module emits (canvas → JPEG). The item form
+ * allows an inline data: photo ONLY when it starts with this — any other data:
+ * URI (notably data:image/svg+xml, which can carry active content) is rejected
+ * at save, so a pasted URI can't become stored XSS.
+ */
+export const JPEG_DATA_URL_PREFIX = 'data:image/jpeg;base64,';
 /** Longest edge of the stored thumbnail, in CSS pixels. */
 export const MAX_DIMENSION = 1024;
 /** Hard ceiling on the encoded data-URI length (~180 KB of base64). */

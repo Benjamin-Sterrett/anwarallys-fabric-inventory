@@ -28,7 +28,10 @@ vi.mock('@/lib/queries', async () => {
   return { ...actual, getFolderById: mockGetFolderById };
 });
 
-vi.mock('@/lib/image', () => ({ downscaleImage: mockDownscaleImage }));
+vi.mock('@/lib/image', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/image')>('@/lib/image');
+  return { ...actual, downscaleImage: mockDownscaleImage };
+});
 
 const fakeUser = () =>
   ({ email: 'staff@fabric.local', emailVerified: true, uid: 'uid-1' }) as unknown as import('firebase/auth').User;
@@ -166,5 +169,22 @@ describe('ItemNewRoute — photo picker (PRJ-2255)', () => {
     await user.click(screen.getByRole('button', { name: 'Create item' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('http://');
+  });
+
+  it('rejects a pasted data:image/svg+xml URI on submit (stored-XSS guard)', async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await screen.findByLabelText('Item code');
+
+    // Only the picker's data:image/jpeg is allowed inline; an SVG data URI
+    // (which can carry active content) must be rejected, not stored.
+    const svg = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>';
+    const pasteField = screen.getByLabelText('Or paste a photo link');
+    // fireEvent.change to set the raw value in one shot (userEvent.type would
+    // fire per-char which is slow for this string and unnecessary here).
+    fireEvent.change(pasteField, { target: { value: svg } });
+    await user.click(screen.getByRole('button', { name: 'Create item' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be used');
   });
 });

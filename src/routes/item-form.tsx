@@ -14,7 +14,7 @@ import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createItem, getFolderById, getItemById, updateItem } from '@/lib/queries';
 import type { Folder, RollItem } from '@/lib/models';
 import { generateSku } from '@/lib/sku';
-import { downscaleImage, MAX_BYTES } from '@/lib/image';
+import { downscaleImage, MAX_BYTES, JPEG_DATA_URL_PREFIX } from '@/lib/image';
 import BackButton from '@/components/BackButton';
 
 /** Default low-stock threshold when the user leaves Minimum stock blank. */
@@ -217,7 +217,10 @@ function ItemFormPage(props: ItemFormPageProps) {
     const photoRaw = form.photoUrl.trim();
     if (photoRaw !== '') {
       if (photoRaw.startsWith('data:')) {
-        if (!photoRaw.startsWith('data:image/')) { setSubmitError('That photo could not be used. Please choose an image.'); return; }
+        // Only the in-app picker's JPEG output is allowed inline. Reject every
+        // other data: URI — notably data:image/svg+xml, which can carry active
+        // content (stored-XSS vector via a pasted URI).
+        if (!photoRaw.startsWith(JPEG_DATA_URL_PREFIX)) { setSubmitError('That photo could not be used. Take or choose a photo, or paste an http(s) link.'); return; }
         if (photoRaw.length > MAX_BYTES) { setSubmitError('That photo is too large. Please choose a smaller image.'); return; }
       } else if (!/^https?:\/\//i.test(photoRaw)) {
         setSubmitError('The photo link must start with http:// or https://.'); return;
