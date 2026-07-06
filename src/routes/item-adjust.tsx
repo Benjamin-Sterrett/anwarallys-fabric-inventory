@@ -41,6 +41,9 @@ const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 const INPUT = 'mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base';
 
 type Tab = 'sold' | 'exact';
+// PRJ-2254: how the numeric entry is interpreted. Meters is the stored truth;
+// rolls is a display/entry convenience converted via the item's roll length.
+type EntryUnit = 'meters' | 'rolls';
 
 // 2dp rounding — parser, sold-tab subtraction, stepper all share (R4 P2.1).
 const round2dp = (n: number): number => Math.round(n * 100) / 100;
@@ -264,6 +267,11 @@ function AdjustPage({ itemId }: { itemId: string }) {
   }, [authUser]);
 
   const [tab, setTab] = useState<Tab>('sold');
+  // PRJ-2254: entry-unit convenience layer. `unit` picks how the numeric
+  // input is interpreted; meters stays the sole stored/transacted quantity.
+  // "rolls" multiplies the entry by the item's immutable roll length
+  // (`initialMeters`) before it reaches the existing meters write path.
+  const [unit, setUnit] = useState<EntryUnit>('meters');
   const [metersInput, setMetersInput] = useState('');
   const [reason, setReason] = useState<MovementReason | null>(null);
   const [note, setNote] = useState('');
@@ -296,15 +304,32 @@ function AdjustPage({ itemId }: { itemId: string }) {
 
   const parsed = useMemo(() => parseDecimalLocale(metersInput), [metersInput]);
 
+  // PRJ-2254: rolls entry is only meaningful when the item has a positive,
+  // finite roll length. Guard against divide/multiply-by-zero and NaN so a
+  // degenerate `initialMeters` (<= 0 or non-finite) silently falls back to
+  // meters mode — the rolls toggle is hidden and `effectiveUnit` is 'meters'.
+  const rollLength = item ? item.initialMeters : null;
+  const rollModeAvailable = rollLength !== null && Number.isFinite(rollLength) && rollLength > 0;
+  const effectiveUnit: EntryUnit = unit === 'rolls' && rollModeAvailable ? 'rolls' : 'meters';
+
+  // Meters-equivalent of the entry: in rolls mode multiply by roll length and
+  // round to the app's 2dp meters precision; in meters mode it IS the entry.
+  // This is the ONLY conversion point — everything downstream stays in meters.
+  const enteredMeters = useMemo<number | null>(() => {
+    if (parsed === null) return null;
+    if (effectiveUnit === 'rolls' && rollLength) return round2dp(parsed * rollLength);
+    return parsed;
+  }, [parsed, effectiveUnit, rollLength]);
+
   // Sold: round2dp guards against legacy drifted remainingMeters (R4 P2.1).
   const targetNewMeters = useMemo<number | null>(() => {
-    if (parsed === null || !item) return null;
+    if (enteredMeters === null || !item) return null;
     if (tab === 'sold') {
-      const next = round2dp(item.remainingMeters - parsed);
+      const next = round2dp(item.remainingMeters - enteredMeters);
       return Number.isFinite(next) ? next : null;
     }
-    return parsed;
-  }, [parsed, tab, item]);
+    return enteredMeters;
+  }, [enteredMeters, tab, item]);
 
   const delta = useMemo<number | null>(
     () => targetNewMeters === null || !item ? null : targetNewMeters - item.remainingMeters,
@@ -341,6 +366,15 @@ function AdjustPage({ itemId }: { itemId: string }) {
     setNote('');
     setSubmitError(null);
   }, [tab]);
+
+  // PRJ-2254: switching units reinterprets the same digits (e.g. "5" would flip
+  // from 5 m to 5 rolls), so clear the entry to avoid a silent value change.
+  const onUnit = useCallback((next: EntryUnit) => {
+    if (next === unit) return;
+    setUnit(next);
+    setMetersInput('');
+    setSubmitError(null);
+  }, [unit]);
 
   const onSavePressed = useCallback(() => {
     setSubmitError(null);
@@ -632,10 +666,26 @@ function AdjustPage({ itemId }: { itemId: string }) {
           className={`${BTN_BASE} ${tab === 'exact' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Set to exact</button>
       </div>
 
+      {rollModeAvailable ? (
+        <div className="mb-4">
+          <div className="inline-flex rounded-md border border-gray-300 bg-white" role="group" aria-label="Entry unit">
+            <button type="button" aria-pressed={effectiveUnit === 'meters'} onClick={() => onUnit('meters')}
+              disabled={saveState === 'inconclusive'}
+              className={`${BTN_BASE} ${effectiveUnit === 'meters' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Meters</button>
+            <button type="button" aria-pressed={effectiveUnit === 'rolls'} onClick={() => onUnit('rolls')}
+              disabled={saveState === 'inconclusive'}
+              className={`${BTN_BASE} ${effectiveUnit === 'rolls' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Rolls</button>
+          </div>
+          <p className="mt-1 text-xs text-gray-600">1 roll = {formatMeters(rollLength as number)}</p>
+        </div>
+      ) : null}
+
       <div className="mb-4">
         <label className="block">
           <span className="text-sm font-medium text-gray-800">
-            {tab === 'sold' ? 'Meters sold or used' : 'New on-hand (meters)'}
+            {tab === 'sold'
+              ? (effectiveUnit === 'rolls' ? 'Rolls sold or used' : 'Meters sold or used')
+              : (effectiveUnit === 'rolls' ? 'New on-hand (rolls)' : 'New on-hand (meters)')}
           </span>
           <div className="mt-1 flex items-stretch gap-2">
             <button type="button" aria-label="Decrease"
@@ -653,6 +703,13 @@ function AdjustPage({ itemId }: { itemId: string }) {
               disabled={saveState === 'inconclusive'}
               className={`${BTN_SECONDARY} px-4`}>+</button>
           </div>
+          {parsed !== null && rollModeAvailable && rollLength ? (
+            <p className="mt-1 text-xs text-gray-600">
+              {effectiveUnit === 'rolls'
+                ? `${parsed} roll${parsed === 1 ? '' : 's'} × ${formatMeters(rollLength)} = ${formatMeters(enteredMeters ?? 0)}`
+                : `≈ ${round2dp(parsed / rollLength)} roll${round2dp(parsed / rollLength) === 1 ? '' : 's'}`}
+            </p>
+          ) : null}
         </label>
       </div>
 

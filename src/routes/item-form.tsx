@@ -184,7 +184,7 @@ function ItemFormPage(props: ItemFormPageProps) {
     setSubmitting(true);
     if (props.mode === 'create') {
       if (!folder) { setSubmitting(false); setSubmitError('Folder not loaded.'); return; }
-      const initParse = parseNum(form.initialMeters, 'Original length', 'required-positive');
+      const initParse = parseNum(form.initialMeters, 'Roll length', 'required-positive');
       if (!initParse.ok) { setSubmitting(false); setSubmitError(initParse.message); return; }
       const createR = await createItem({
         folderId: folder.folderId,
@@ -241,7 +241,7 @@ function ItemFormPage(props: ItemFormPageProps) {
   // Live preview — rules force remainingMeters = initialMeters on create.
   const initialPreview = form.initialMeters.trim();
   const remainingHint = props.mode === 'create'
-    ? (initialPreview === '' ? 'Will match original length once you fill it in.' : `Will start at ${initialPreview} m.`)
+    ? (initialPreview === '' ? 'Will match roll length once you fill it in.' : `Will start at ${initialPreview} m.`)
     : `Currently ${item?.remainingMeters ?? 0} m. Adjust stock from the item page.`;
 
   return (
@@ -267,11 +267,11 @@ function ItemFormPage(props: ItemFormPageProps) {
         <TextField label="Price per meter (₹)" value={form.price} onChange={(v) => update('price', v)}
           inputMode="decimal" placeholder="Optional" />
 
-        <TextField label="Original length (meters)" value={form.initialMeters}
+        <TextField label="Roll length (meters)" value={form.initialMeters}
           onChange={(v) => update('initialMeters', v)} inputMode="decimal"
           disabled={props.mode === 'edit'}
           hint={props.mode === 'edit'
-            ? 'Original length is permanent. Add a new item if the original roll length is wrong.'
+            ? 'Roll length is permanent. Add a new item if the roll length is wrong.'
             : undefined} />
 
         <div>

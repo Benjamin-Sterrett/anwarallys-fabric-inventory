@@ -217,7 +217,7 @@ function ItemPage({ itemId }: { itemId: string }) {
         </div>
         <p className="text-xs uppercase tracking-wide text-gray-500">On hand</p>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
-          <dt className="text-gray-500">Original</dt>
+          <dt className="text-gray-500">Roll length</dt>
           <dd>{formatMeters(item.initialMeters)}</dd>
           {item.supplier ? (<>
             <dt className="text-gray-500">Supplier</dt>
