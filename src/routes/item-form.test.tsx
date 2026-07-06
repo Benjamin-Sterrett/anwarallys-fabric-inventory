@@ -1,21 +1,23 @@
 // PRJ-2253 — item create pre-fills a generated item code, still editable.
+// PRJ-2255 — item create can take/choose a photo (downscaled, inline preview).
 //
-// Scoped to the create-mode "Item code" behavior: the form should open with a
-// generated code already in the field (so staff don't invent one), and typing
-// must replace it (the field stays user-editable per the locked model).
+// Scoped to the create-mode "Item code" behavior (generated + editable) and the
+// photo picker (downscale → preview → remove; friendly error on reject).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
 import ItemNewRoute from './item-form';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { getFolderById } from '@/lib/queries';
+import { downscaleImage } from '@/lib/image';
 import type { Folder } from '@/lib/models';
 
 const mockSubscribeToAuthState = vi.hoisted(() => vi.fn());
 const mockGetFolderById = vi.hoisted(() => vi.fn());
+const mockDownscaleImage = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/firebase/auth', () => ({
   subscribeToAuthState: mockSubscribeToAuthState,
@@ -24,6 +26,11 @@ vi.mock('@/lib/firebase/auth', () => ({
 vi.mock('@/lib/queries', async () => {
   const actual = await vi.importActual<typeof import('@/lib/queries')>('@/lib/queries');
   return { ...actual, getFolderById: mockGetFolderById };
+});
+
+vi.mock('@/lib/image', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/image')>('@/lib/image');
+  return { ...actual, downscaleImage: mockDownscaleImage };
 });
 
 const fakeUser = () =>
@@ -69,5 +76,115 @@ describe('ItemNewRoute — generated item code (PRJ-2253)', () => {
     await user.clear(field);
     await user.type(field, 'MY-CUSTOM-CODE');
     expect(field.value).toBe('MY-CUSTOM-CODE');
+  });
+});
+
+describe('ItemNewRoute — photo picker (PRJ-2255)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(subscribeToAuthState).mockImplementation((cb) => { cb(fakeUser()); return () => {}; });
+    vi.mocked(getFolderById).mockResolvedValue({ ok: true, data: makeFolder() });
+  });
+
+  const jpeg = () => new File([new Uint8Array([1, 2, 3])], 'roll.jpg', { type: 'image/jpeg' });
+
+  it('downscales a picked photo and shows an inline preview', async () => {
+    vi.mocked(downscaleImage).mockResolvedValue({ ok: true, dataUrl: 'data:image/jpeg;base64,PREVIEW' });
+    const user = userEvent.setup();
+    const { container } = renderNew();
+    await screen.findByLabelText('Item code'); // form hydrated
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, jpeg());
+
+    const img = await screen.findByAltText('Item photo preview');
+    expect(img).toHaveAttribute('src', 'data:image/jpeg;base64,PREVIEW');
+    expect(downscaleImage).toHaveBeenCalledOnce();
+  });
+
+  it('removes the photo when Remove is clicked', async () => {
+    vi.mocked(downscaleImage).mockResolvedValue({ ok: true, dataUrl: 'data:image/jpeg;base64,PREVIEW' });
+    const user = userEvent.setup();
+    const { container } = renderNew();
+    await screen.findByLabelText('Item code');
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, jpeg());
+    await screen.findByAltText('Item photo preview');
+
+    await user.click(screen.getByRole('button', { name: 'Remove photo' }));
+    expect(screen.queryByAltText('Item photo preview')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a friendly error and shows no preview when downscale fails', async () => {
+    vi.mocked(downscaleImage).mockResolvedValue({ ok: false, error: 'That photo is too large even after shrinking. Try a smaller image.' });
+    const user = userEvent.setup();
+    const { container } = renderNew();
+    await screen.findByLabelText('Item code');
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, jpeg());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('too large');
+    expect(screen.queryByAltText('Item photo preview')).not.toBeInTheDocument();
+  });
+
+  it('disables submit while a photo is still processing (no save race)', async () => {
+    // A downscale that never resolves keeps photoBusy true.
+    vi.mocked(downscaleImage).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    const { container } = renderNew();
+    await screen.findByLabelText('Item code');
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, jpeg());
+
+    const submitBtn = await screen.findByRole('button', { name: 'Processing photo…' });
+    expect(submitBtn).toBeDisabled();
+  });
+
+  it('blocks a direct form submit while the photo is still processing (stale-closure guard)', async () => {
+    // Never-resolving downscale keeps photoBusy true. Submitting the form
+    // directly bypasses the disabled button — the Enter-key path — so this only
+    // passes if `submit` sees the live photoBusy (photoBusy in useCallback deps).
+    vi.mocked(downscaleImage).mockReturnValue(new Promise(() => {}));
+    const user = userEvent.setup();
+    const { container } = renderNew();
+    await screen.findByLabelText('Item code');
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, jpeg());
+    await screen.findByRole('button', { name: 'Processing photo…' });
+
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+    expect(await screen.findByRole('alert')).toHaveTextContent('still processing');
+  });
+
+  it('rejects a pasted non-http(s) photo link on submit', async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await screen.findByLabelText('Item code');
+
+    await user.type(screen.getByLabelText('Or paste a photo link'), 'ftp://host/pic.jpg');
+    await user.click(screen.getByRole('button', { name: 'Create item' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('http://');
+  });
+
+  it('rejects a pasted data:image/svg+xml URI on submit (stored-XSS guard)', async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await screen.findByLabelText('Item code');
+
+    // Only the picker's data:image/jpeg is allowed inline; an SVG data URI
+    // (which can carry active content) must be rejected, not stored.
+    const svg = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>';
+    const pasteField = screen.getByLabelText('Or paste a photo link');
+    // fireEvent.change to set the raw value in one shot (userEvent.type would
+    // fire per-char which is slow for this string and unnecessary here).
+    fireEvent.change(pasteField, { target: { value: svg } });
+    await user.click(screen.getByRole('button', { name: 'Create item' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be used');
   });
 });

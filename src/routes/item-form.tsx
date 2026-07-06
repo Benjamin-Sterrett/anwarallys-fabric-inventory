@@ -7,13 +7,14 @@
 // still wait for authUser !== undefined so submit isn't fired with a
 // stale null actorUid (early-page-load race; see auth.ts).
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createItem, getFolderById, getItemById, updateItem } from '@/lib/queries';
 import type { Folder, RollItem } from '@/lib/models';
 import { generateSku } from '@/lib/sku';
+import { downscaleImage, MAX_BYTES, JPEG_DATA_URL_PREFIX } from '@/lib/image';
 import BackButton from '@/components/BackButton';
 
 /** Default low-stock threshold when the user leaves Minimum stock blank. */
@@ -157,8 +158,39 @@ function ItemFormPage(props: ItemFormPageProps) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // PRJ-2255: photo capture. The picked image is downscaled to a small JPEG
+  // data URI and stored inline in the existing `photoUrl` field (owner chose
+  // inline-no-billing over Firebase Storage). Paste-a-URL stays as a fallback.
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
   const update = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
+  }, []);
+
+  const onPickPhoto = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input so re-picking the same file still fires onChange.
+    e.target.value = '';
+    if (!file) return;
+    setPhotoError(null);
+    setPhotoBusy(true);
+    try {
+      const result = await downscaleImage(file);
+      if (result.ok) {
+        setForm((f) => ({ ...f, photoUrl: result.dataUrl }));
+      } else {
+        setPhotoError(result.error);
+      }
+    } finally {
+      setPhotoBusy(false);
+    }
+  }, []);
+
+  const onRemovePhoto = useCallback(() => {
+    setPhotoError(null);
+    setForm((f) => ({ ...f, photoUrl: '' }));
   }, []);
 
   const cancelTarget = useMemo(
@@ -173,6 +205,27 @@ function ItemFormPage(props: ItemFormPageProps) {
 
     const trimmedSku = form.sku.trim();
     if (trimmedSku === '') { setSubmitError('Item code is required.'); return; }
+
+    // PRJ-2255: don't let a submit race the photo downscale — it would persist
+    // the previous/empty photoUrl and silently drop the chosen photo.
+    if (photoBusy) { setSubmitError('Please wait — the photo is still processing.'); return; }
+
+    // Validate photoUrl before save (the paste-a-link fallback is free text):
+    // an inline data: image must be a real image under the same size ceiling the
+    // picker enforces; anything else must be an http(s) link. Guards against a
+    // pasted oversized data URI failing at Firestore with a raw doc-size error.
+    const photoRaw = form.photoUrl.trim();
+    if (photoRaw !== '') {
+      if (photoRaw.startsWith('data:')) {
+        // Only the in-app picker's JPEG output is allowed inline. Reject every
+        // other data: URI — notably data:image/svg+xml, which can carry active
+        // content (stored-XSS vector via a pasted URI).
+        if (!photoRaw.startsWith(JPEG_DATA_URL_PREFIX)) { setSubmitError('That photo could not be used. Take or choose a photo, or paste an http(s) link.'); return; }
+        if (photoRaw.length > MAX_BYTES) { setSubmitError('That photo is too large. Please choose a smaller image.'); return; }
+      } else if (!/^https?:\/\//i.test(photoRaw)) {
+        setSubmitError('The photo link must start with http:// or https://.'); return;
+      }
+    }
 
     const minParse = parseNum(form.minimumMeters, 'Minimum stock', 'default-nonneg');
     if (!minParse.ok) { setSubmitError(minParse.message); return; }
@@ -214,7 +267,7 @@ function ItemFormPage(props: ItemFormPageProps) {
     setSubmitting(false);
     if (!r.ok) { setSubmitError(`Could not save item: ${r.error.message} (${r.error.code})`); return; }
     navigate(`/folders/${item.folderId}`);
-  }, [authUser, form, folder, item, props.mode, navigate]);
+  }, [authUser, form, folder, item, props.mode, navigate, photoBusy]);
 
   if (authUser === undefined || (!loadError && !hydrated)) {
     return <section className="mx-auto max-w-2xl px-4 py-8"><p className="text-sm text-gray-600">Loading…</p></section>;
@@ -288,14 +341,44 @@ function ItemFormPage(props: ItemFormPageProps) {
           onChange={(v) => update('minimumMeters', v)} inputMode="decimal"
           placeholder={`Optional — default ${DEFAULT_MIN_METERS}`} />
 
-        <TextField label="Photo URL" value={form.photoUrl} onChange={(v) => update('photoUrl', v)}
-          type="url" placeholder="Paste a link to a photo (upload coming later)" />
+        <div>
+          <span className="text-sm font-medium text-gray-800">Photo</span>
+          {form.photoUrl ? (
+            <div className="mt-1">
+              <img
+                src={form.photoUrl}
+                alt="Item photo preview"
+                className="max-h-48 w-auto rounded-md border border-gray-200 object-contain"
+              />
+              <button type="button" onClick={onRemovePhoto} disabled={photoBusy}
+                className={`${BTN_SECONDARY} mt-2`}>Remove photo</button>
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-gray-500">No photo yet.</p>
+          )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onPickPhoto}
+            className="sr-only"
+          />
+          <button type="button" onClick={() => photoInputRef.current?.click()} disabled={photoBusy}
+            className={`${BTN_SECONDARY} mt-2`}>
+            {photoBusy ? 'Processing…' : form.photoUrl ? 'Replace photo' : 'Take or choose photo'}
+          </button>
+          {photoError ? <p className="mt-1 text-sm text-red-700" role="alert">{photoError}</p> : null}
+          <TextField label="Or paste a photo link" value={form.photoUrl.startsWith('data:') ? '' : form.photoUrl}
+            onChange={(v) => update('photoUrl', v)} type="url"
+            placeholder="Optional — paste an image URL instead" />
+        </div>
 
         {submitError ? <p className="text-sm text-red-700" role="alert">{submitError}</p> : null}
 
         <div className="flex flex-wrap gap-2 pt-2">
-          <button type="submit" disabled={submitting} className={BTN_PRIMARY}>
-            {submitting ? 'Saving…' : props.mode === 'create' ? 'Create item' : 'Save changes'}
+          <button type="submit" disabled={submitting || photoBusy} className={BTN_PRIMARY}>
+            {submitting ? 'Saving…' : photoBusy ? 'Processing photo…' : props.mode === 'create' ? 'Create item' : 'Save changes'}
           </button>
           <Link to={cancelTarget} className={BTN_SECONDARY}>Back</Link>
         </div>
