@@ -13,6 +13,7 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { subscribeToAuthState } from '@/lib/firebase/auth';
 import { createItem, getFolderById, getItemById, updateItem } from '@/lib/queries';
 import type { Folder, RollItem } from '@/lib/models';
+import { generateSku } from '@/lib/sku';
 import BackButton from '@/components/BackButton';
 
 /** Default low-stock threshold when the user leaves Minimum stock blank. */
@@ -144,10 +145,14 @@ function ItemFormPage(props: ItemFormPageProps) {
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [hydrated, setHydrated] = useState(false);
+  // PRJ-2253: pre-fill a generated item code on create so staff don't have to
+  // invent one (and every item gets a usable torn-QR backup code). Generated
+  // once per mount so it's stable across re-renders; staff can edit it freely.
+  const [generatedSku] = useState(generateSku);
   useEffect(() => {
     if (props.mode === 'edit' && item && folder) { setForm(fromItem(item)); setHydrated(true); }
-    else if (props.mode === 'create' && folder) { setForm(EMPTY_FORM); setHydrated(true); }
-  }, [props.mode, item, folder]);
+    else if (props.mode === 'create' && folder) { setForm({ ...EMPTY_FORM, sku: generatedSku }); setHydrated(true); }
+  }, [props.mode, item, folder, generatedSku]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
