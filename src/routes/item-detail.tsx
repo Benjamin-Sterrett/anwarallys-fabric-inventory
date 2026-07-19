@@ -39,6 +39,7 @@ import RollLabel from '@/components/RollLabel';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import BackButton from '@/components/BackButton';
 import { buildLabelImage, buildDownloadUrl, sanitizeFilename } from '@/lib/labelImage';
+import { downloadLabelPdf } from '@/lib/labelPdf';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
@@ -117,6 +118,8 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingLabel, setDownloadingLabel] = useState(false);
+  const [downloadLabelError, setDownloadLabelError] = useState<string | null>(null);
 
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -284,6 +287,16 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
     });
   }
 
+  function handleDownloadLabel(item: RollItem) {
+    setDownloadLabelError(null);
+    setDownloadingLabel(true);
+    void downloadLabelPdf(item.itemId, item.sku, item.description).catch((e) => {
+      setDownloadLabelError(e instanceof Error ? e.message : 'Failed to generate label PDF');
+    }).finally(() => {
+      setDownloadingLabel(false);
+    });
+  }
+
   if (authUser === undefined || item === undefined) {
     return (
       <section className="mx-auto max-w-2xl px-4 py-8">
@@ -369,6 +382,14 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
         </button>
         <button
           type="button"
+          onClick={() => { void handleDownloadLabel(item); }}
+          disabled={downloadingLabel || !buildDownloadUrl(item.itemId)}
+          className={BTN_SECONDARY}
+        >
+          {downloadingLabel ? 'Downloading…' : 'Download label'}
+        </button>
+        <button
+          type="button"
           onClick={() => navigate(`/print/label/${item.itemId}?size=default`)}
           className={BTN_SECONDARY}
         >
@@ -382,6 +403,10 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
           Delete item
         </button>
       </div>
+
+      {downloadLabelError ? (
+        <p className="mb-3 text-sm text-red-700" role="alert">Label download failed: {downloadLabelError}</p>
+      ) : null}
 
       {deleteOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" role="dialog" aria-modal="true">

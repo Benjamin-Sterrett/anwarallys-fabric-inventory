@@ -83,6 +83,56 @@ function renderQRImage(value: string): Promise<HTMLImageElement> {
 }
 
 /**
+ * Render a QR code to a PNG data URL at the given pixel size.
+ *
+ * Exported as a shared helper so labelPdf.ts can reuse the QR→canvas→PNG
+ * pipeline without duplicating it from buildLabelImage.
+ *
+ * @param url The URL to encode in the QR code.
+ * @param sizePx Width and height of the output PNG in pixels (square).
+ * @returns A data URL string (data:image/png;base64,...).
+ */
+export async function renderQrPngDataUrl(url: string, sizePx: number): Promise<string> {
+  const svgMarkup = renderToStaticMarkup(
+    <QRCodeSVG
+      value={url}
+      level="Q"
+      marginSize={4}
+      bgColor="#FFFFFF"
+      fgColor="#000000"
+    />,
+  );
+
+  const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+  const svgUrl = URL.createObjectURL(svgBlob);
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(svgUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(svgUrl);
+      reject(new Error('Failed to decode QR SVG as image'));
+    };
+    image.src = svgUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sizePx;
+  canvas.height = sizePx;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get 2D context for QR canvas');
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, sizePx, sizePx);
+  ctx.drawImage(img, 0, 0, sizePx, sizePx);
+
+  return canvas.toDataURL('image/png');
+}
+
+/**
  * Compose the final label image: white background, QR code centered at top,
  * SKU (bold) beneath it, then name (regular) beneath that.
  */
