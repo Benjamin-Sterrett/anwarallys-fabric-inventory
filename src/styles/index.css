@@ -98,6 +98,7 @@ body {
 
   body.label-print-mode header,
   body.label-print-mode [data-auth-bar],
+  body.label-print-mode [data-app-drawer],
   body.label-print-mode .print-hide {
     display: none !important;
   }

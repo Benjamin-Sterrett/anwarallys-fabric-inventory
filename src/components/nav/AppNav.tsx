@@ -49,8 +49,17 @@ export default function AppNav({ children }: { children?: ReactNode }) {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
+  // Mirrors `drawerOpen` so the route-change effect can read the current value
+  // without depending on it (depending on it would close the drawer the instant
+  // it opens). Lets a route-change close go through `closeDrawer` — restoring
+  // focus to the ☰ — only when the drawer was actually open.
+  const drawerOpenRef = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    drawerOpenRef.current = drawerOpen;
+  }, [drawerOpen]);
 
   useEffect(() => {
     const unsub = subscribeToAuthState((u) => setAuthUser(u));
@@ -137,11 +146,16 @@ export default function AppNav({ children }: { children?: ReactNode }) {
     hamburgerRef.current?.focus();
   }, []);
 
-  // Close the drawer on route change (item tap also calls onNavigate, but a
-  // programmatic navigate — e.g. sign-out — is covered here too).
+  // Close the drawer on route change through the SAME path as every other
+  // close (Esc/overlay/item-tap) so focus is always returned to the ☰. Guarded
+  // on the ref so an ordinary navigation with the drawer already closed never
+  // steals focus to the hamburger. Covers programmatic navigations (e.g.
+  // sign-out) and history changes, not just item taps.
   useEffect(() => {
-    setDrawerOpen(false);
-  }, [location.pathname]);
+    if (drawerOpenRef.current) {
+      closeDrawer();
+    }
+  }, [location.pathname, closeDrawer]);
 
   const handleSignOut = useCallback(async () => {
     // eslint-disable-next-line no-alert -- v1: simple confirm matches /staff page pattern.

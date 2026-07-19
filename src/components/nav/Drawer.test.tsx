@@ -50,6 +50,14 @@ describe('Drawer', () => {
     expect(dialog).toHaveAttribute('id', 'app-drawer');
   });
 
+  it('wraps the overlay + panel in the [data-app-drawer] print-hide hook', () => {
+    const { container } = renderDrawer();
+    // The label-print CSS hides `[data-app-drawer]`, so both the panel...
+    expect(screen.getByRole('dialog', { name: 'Menu' }).closest('[data-app-drawer]')).not.toBeNull();
+    // ...and the overlay are hidden when a label prints.
+    expect(container.querySelector('.drawer-overlay')?.closest('[data-app-drawer]')).not.toBeNull();
+  });
+
   it('shows the signed-in label and a Close button', () => {
     renderDrawer();
     const dialog = within(screen.getByRole('dialog', { name: 'Menu' }));

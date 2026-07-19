@@ -391,5 +391,21 @@ describe('AppNav', () => {
         expect(screen.queryByRole('dialog', { name: 'Menu' })).not.toBeInTheDocument();
       });
     });
+
+    it('closes on a route change (not via item tap) and returns focus to the ☰', async () => {
+      signIn();
+      renderNav({ initialEntries: ['/'] });
+      const hamburger = await screen.findByRole('button', { name: 'Menu' });
+      fireEvent.click(hamburger);
+      await screen.findByRole('dialog', { name: 'Menu' });
+      // Navigate via a SIDEBAR link — a pure route change that does NOT go
+      // through the drawer's own onNavigate close handler.
+      fireEvent.click(within(sidebar()).getByRole('link', { name: /find/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Menu' })).not.toBeInTheDocument();
+      });
+      expect(lastPath).toBe('/find');
+      expect(document.activeElement).toBe(hamburger);
+    });
   });
 });

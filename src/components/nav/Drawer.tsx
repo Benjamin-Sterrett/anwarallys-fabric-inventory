@@ -79,7 +79,11 @@ export default function Drawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 lg:hidden" data-drawer-root>
+    // `data-app-drawer` is the print-hide hook: the `@media print
+    // body.label-print-mode [data-app-drawer]` rule (src/styles/index.css)
+    // hides this root — and thus BOTH the overlay and the panel it contains —
+    // so an open drawer never overlays a label print.
+    <div className="fixed inset-0 z-50 lg:hidden" data-app-drawer>
       <div
         className="drawer-overlay absolute inset-0 bg-black/50"
         aria-hidden="true"
