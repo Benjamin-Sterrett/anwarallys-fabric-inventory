@@ -1,5 +1,6 @@
-import { Outlet, Link } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import AuthBar from './components/AuthBar';
+import BrandWordmark from './components/BrandWordmark';
 
 // App shell. <AuthBar> renders below the brand header for every route;
 // it self-hides when there is no signed-in user (the route guard handles
@@ -10,9 +11,7 @@ export default function App() {
     <div className="min-h-full flex flex-col">
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-          <Link to="/" className="text-lg font-semibold text-gray-900">
-            Fabric Inventory
-          </Link>
+          <BrandWordmark />
         </div>
       </header>
       <AuthBar />

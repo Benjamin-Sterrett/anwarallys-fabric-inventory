@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+/* ── Anwarallys brand tokens (single source of truth) ────────────────────
+   Tailwind v4 @theme: --color-* auto-generates bg-/text-/border- utilities;
+   --font-* generates font- utilities. Change a brand hue here → everywhere.
+   Palette roles (WCAG 2.1): white on brand = 5.34:1 (AA) → button fills;
+   brand-dark on white = 8.27:1 (AAA) → small text / links. */
+@theme {
+  --color-brand: #1B7A4D;
+  --color-brand-dark: #0F5A38;
+  --color-brand-tint: #E7F3EC;
+  --font-brand: "Pacifico", cursive;
+}
+
+/* Self-hosted Pacifico (SIL OFL 1.1) — no third-party CDN request.
+   Served from public/fonts/ → /fonts/. font-display:swap → the wordmark
+   falls back to system cursive if the woff2 is unavailable (never invisible). */
+@font-face {
+  font-family: "Pacifico";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Pacifico-Regular.woff2") format("woff2");
+}
+
 /* Base page styles. Tailwind v4 handles the rest via utility classes. */
 html,
 body,

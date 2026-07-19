@@ -87,7 +87,7 @@ export default function RecentHistory({
         <h2 id="recent-history-heading" className="text-sm font-medium text-gray-700">
           Recent history
         </h2>
-        <Link to={`/items/${itemId}`} className="text-sm font-medium text-gray-700 underline">
+        <Link to={`/items/${itemId}`} className="text-sm font-medium text-brand-dark underline">
           View full history
         </Link>
       </div>

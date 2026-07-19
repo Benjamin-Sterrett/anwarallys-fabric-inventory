@@ -86,7 +86,7 @@ function RestoreConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
           >
             {loading ? 'Restoring…' : 'Restore'}
           </button>

@@ -53,7 +53,7 @@ function NotAuthorized({ reason }: { reason: string }) {
         <p className="mt-2 text-sm text-gray-700">{reason}</p>
         <Link
           to="/"
-          className="mt-6 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white"
+          className="mt-6 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-brand px-5 py-3 text-sm font-medium text-white"
         >
           Go to the home page
         </Link>

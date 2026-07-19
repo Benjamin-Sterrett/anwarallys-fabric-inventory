@@ -12,7 +12,7 @@ import { Breadcrumbs } from '@/components/Breadcrumbs';
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
-const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
+const BTN_PRIMARY = `${BTN_BASE} bg-brand text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 
 const round2dp = (n: number): number => Math.round(n * 100) / 100;

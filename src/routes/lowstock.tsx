@@ -5,7 +5,7 @@ import type { RollItem } from '@/lib/models';
 import BackButton from '@/components/BackButton';
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
-const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
+const BTN_PRIMARY = `${BTN_BASE} bg-brand text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 
 function formatMeters(n: number): string {

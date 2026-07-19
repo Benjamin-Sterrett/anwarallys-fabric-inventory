@@ -140,7 +140,7 @@ function AddStaffForm({ adminUid, onAdded }: AddStaffFormProps) {
       <button
         type="submit"
         disabled={submitting}
-        className="mt-4 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-50"
+        className="mt-4 inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-brand px-5 py-3 text-sm font-medium text-white disabled:opacity-50"
       >
         {submitting ? 'Adding…' : 'Add staff'}
       </button>
@@ -214,7 +214,7 @@ function ActiveStaffRow({ staff, adminUid, onChanged }: ActiveStaffRowProps) {
               type="button"
               onClick={saveRename}
               disabled={busy}
-              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-50"
+              className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-brand px-5 py-3 text-sm font-medium text-white disabled:opacity-50"
             >
               {busy ? 'Saving…' : 'Save'}
             </button>
@@ -304,7 +304,7 @@ function InactiveStaffRow({ staff, adminUid, onChanged }: InactiveStaffRowProps)
             type="button"
             onClick={reactivate}
             disabled={busy}
-            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-brand px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? 'Turning on…' : 'Turn on'}
           </button>

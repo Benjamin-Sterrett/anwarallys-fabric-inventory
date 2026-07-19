@@ -44,8 +44,11 @@ interface BreadcrumbEntry { folderId: string; name: string | null; }
 const HISTORY_PAGE_SIZE = 50;
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
-const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
+const BTN_PRIMARY = `${BTN_BASE} bg-brand text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
+// Destructive action: red BY CONSTRUCTION — self-contained, no brand/primary
+// background to compose over, so it never depends on Tailwind generation order.
+const BTN_DANGER = `${BTN_BASE} bg-red-700 text-white`;
 
 import { reasonLabel } from '@/components/ReasonChips';
 
@@ -374,7 +377,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
                 type="button"
                 onClick={() => { void onDeleteConfirm(); }}
                 disabled={deleteSubmitting}
-                className={`${BTN_PRIMARY} bg-red-700`}
+                className={BTN_DANGER}
               >
                 {deleteSubmitting ? 'Deleting…' : 'Delete'}
               </button>

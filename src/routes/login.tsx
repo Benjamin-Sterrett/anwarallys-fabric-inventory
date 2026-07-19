@@ -166,7 +166,7 @@ export default function LoginRoute() {
           <button
             type="submit"
             disabled={submitting}
-            className="inline-flex min-h-12 min-w-12 w-full items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-base font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-12 min-w-12 w-full items-center justify-center rounded-md bg-brand px-5 py-3 text-base font-medium text-white disabled:opacity-50"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>

@@ -19,7 +19,7 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
             ) : (
               <Link
                 to={item.to ?? '/'}
-                className="inline-flex min-h-[44px] min-w-[44px] items-center px-2 text-gray-700 underline-offset-2 hover:text-gray-900 hover:underline"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center px-2 text-brand-dark underline-offset-2 hover:text-gray-900 hover:underline"
               >
                 {item.label}
               </Link>

@@ -73,7 +73,7 @@ export default function PrintLabelsRoute() {
           type="button"
           onClick={() => window.print()}
           disabled={items === undefined || items === null || items.length === 0 || !import.meta.env.VITE_PUBLIC_HOST}
-          className="inline-flex items-center rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="inline-flex items-center rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
           Print
         </button>
