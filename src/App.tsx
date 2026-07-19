@@ -1,23 +1,20 @@
 import { Outlet } from 'react-router-dom';
-import AuthBar from './components/AuthBar';
-import BrandWordmark from './components/BrandWordmark';
+import AppNav from './components/nav/AppNav';
 
-// App shell. <AuthBar> renders below the brand header for every route;
-// it self-hides when there is no signed-in user (the route guard handles
-// redirects to /login). Future tickets add a global SyncStatusIndicator
-// alongside it.
+// App shell. <AppNav> is the branded, responsive navigation: a persistent left
+// Sidebar on desktop web (≥ lg) and a slim TopBar + slide-in Drawer on
+// phone/tablet (< lg). It wraps the routed content so the Sidebar and content
+// share one `lg:flex` row; when there is no signed-in user it renders only the
+// (optional) deactivation banner and the routed page — the route guard handles
+// redirects to /login.
 export default function App() {
   return (
-    <div className="min-h-full flex flex-col">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
-          <BrandWordmark />
-        </div>
-      </header>
-      <AuthBar />
-      <main className="flex-1">
-        <Outlet />
-      </main>
+    <div className="flex min-h-full flex-col">
+      <AppNav>
+        <main className="flex-1">
+          <Outlet />
+        </main>
+      </AppNav>
     </div>
   );
 }

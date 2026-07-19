@@ -23,6 +23,44 @@
   src: url("/fonts/Pacifico-Regular.woff2") format("woff2");
 }
 
+/* ── Mobile nav drawer slide/fade (PRJ-2941) ─────────────────────────────
+   The Drawer conditionally mounts, so an enter animation is driven purely by
+   CSS keyframes here (no JS timing). `prefers-reduced-motion: reduce` disables
+   both the panel slide and the overlay fade — the drawer still appears, just
+   without motion (WCAG 2.3.3 / the a11y AC). */
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes drawer-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.drawer-panel {
+  animation: drawer-slide-in 160ms ease-out;
+}
+
+.drawer-overlay {
+  animation: drawer-fade-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-panel,
+  .drawer-overlay {
+    animation: none;
+  }
+}
+
 /* Base page styles. Tailwind v4 handles the rest via utility classes. */
 html,
 body,
@@ -60,6 +98,7 @@ body {
 
   body.label-print-mode header,
   body.label-print-mode [data-auth-bar],
+  body.label-print-mode [data-app-drawer],
   body.label-print-mode .print-hide {
     display: none !important;
   }
