@@ -26,7 +26,11 @@ import { CREATE_UNDO_WINDOW_MS } from '@/lib/constants';
 
 const SEARCH_DEPTH_MIN = 4;
 const BTN_PRIMARY =
-  'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-gray-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-50';
+  'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-brand px-5 py-3 text-sm font-medium text-white disabled:opacity-50';
+// Destructive action: red BY CONSTRUCTION — self-contained, no brand/primary
+// background to compose over, so it never depends on Tailwind generation order.
+const BTN_DANGER =
+  'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md bg-red-700 px-5 py-3 text-sm font-medium text-white disabled:opacity-50';
 const BTN_SECONDARY =
   'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md border border-gray-300 px-5 py-3 text-sm font-medium text-gray-800 disabled:opacity-50';
 const INPUT =
@@ -475,7 +479,7 @@ export function FolderBrowsePage({ parentId }: { parentId: string | null }) {
                 type="button"
                 onClick={() => { void onDeleteFolder(); }}
                 disabled={deleteSubmitting}
-                className={`${BTN_PRIMARY} bg-red-700`}
+                className={BTN_DANGER}
               >
                 {deleteSubmitting ? 'Deleting…' : 'Delete'}
               </button>

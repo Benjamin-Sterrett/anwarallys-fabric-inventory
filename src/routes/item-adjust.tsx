@@ -36,7 +36,7 @@ const RECONCILE_MAX_ATTEMPTS = 2;
 
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
-const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
+const BTN_PRIMARY = `${BTN_BASE} bg-brand text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 const INPUT = 'mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base';
 
@@ -186,7 +186,7 @@ function HoldToConfirm({ label, onConfirm, disabled }: { label: string; onConfir
       <button
         type="button" disabled={disabled}
         onPointerDown={start} onPointerUp={cancel} onPointerCancel={cancel} onPointerLeave={cancel}
-        className="relative flex w-full items-center justify-center gap-3 rounded-md bg-gray-900 px-6 py-5 text-base font-semibold text-white disabled:opacity-50"
+        className="relative flex w-full items-center justify-center gap-3 rounded-md bg-brand px-6 py-5 text-base font-semibold text-white disabled:opacity-50"
         aria-label={`Hold to confirm: ${label}`}
       >
         <svg width="64" height="64" viewBox="0 0 64 64" aria-hidden="true">
@@ -660,10 +660,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
       <div className="mb-4 inline-flex rounded-md border border-gray-300 bg-white" role="tablist">
         <button type="button" role="tab" aria-selected={tab === 'sold'} onClick={() => onTab('sold')}
           disabled={saveState === 'inconclusive'}
-          className={`${BTN_BASE} ${tab === 'sold' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Sold / used</button>
+          className={`${BTN_BASE} ${tab === 'sold' ? 'bg-brand text-white' : 'text-gray-800'}`}>Sold / used</button>
         <button type="button" role="tab" aria-selected={tab === 'exact'} onClick={() => onTab('exact')}
           disabled={saveState === 'inconclusive'}
-          className={`${BTN_BASE} ${tab === 'exact' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Set to exact</button>
+          className={`${BTN_BASE} ${tab === 'exact' ? 'bg-brand text-white' : 'text-gray-800'}`}>Set to exact</button>
       </div>
 
       {rollModeAvailable ? (
@@ -671,10 +671,10 @@ function AdjustPage({ itemId }: { itemId: string }) {
           <div className="inline-flex rounded-md border border-gray-300 bg-white" role="group" aria-label="Entry unit">
             <button type="button" aria-pressed={effectiveUnit === 'meters'} onClick={() => onUnit('meters')}
               disabled={saveState === 'inconclusive'}
-              className={`${BTN_BASE} ${effectiveUnit === 'meters' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Meters</button>
+              className={`${BTN_BASE} ${effectiveUnit === 'meters' ? 'bg-brand text-white' : 'text-gray-800'}`}>Meters</button>
             <button type="button" aria-pressed={effectiveUnit === 'rolls'} onClick={() => onUnit('rolls')}
               disabled={saveState === 'inconclusive'}
-              className={`${BTN_BASE} ${effectiveUnit === 'rolls' ? 'bg-gray-900 text-white' : 'text-gray-800'}`}>Rolls</button>
+              className={`${BTN_BASE} ${effectiveUnit === 'rolls' ? 'bg-brand text-white' : 'text-gray-800'}`}>Rolls</button>
           </div>
           <p className="mt-1 text-xs text-gray-600">1 roll = {formatMeters(rollLength as number)}</p>
         </div>

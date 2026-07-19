@@ -21,7 +21,7 @@ import BackButton from '@/components/BackButton';
 const DEFAULT_MIN_METERS = 10;
 
 const BTN_BASE = 'inline-flex min-h-12 min-w-12 items-center justify-center rounded-md px-5 py-3 text-sm font-medium disabled:opacity-50';
-const BTN_PRIMARY = `${BTN_BASE} bg-gray-900 text-white`;
+const BTN_PRIMARY = `${BTN_BASE} bg-brand text-white`;
 const BTN_SECONDARY = `${BTN_BASE} border border-gray-300 text-gray-800`;
 const INPUT = 'mt-1 block w-full min-h-12 rounded-md border border-gray-300 px-3 py-2 text-base';
 const INPUT_DISABLED = 'mt-1 block w-full min-h-12 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-base text-gray-600';

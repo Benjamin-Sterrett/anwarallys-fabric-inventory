@@ -183,4 +183,22 @@ describe('ItemDetailRoute', () => {
       }),
     );
   });
+
+  // Regression guard for PRJ-2940 top risk: the delete confirm button must be
+  // RED BY CONSTRUCTION (BTN_DANGER), never inheriting the new brand green.
+  // This is order-independent — it does not rely on Tailwind generation order.
+  it('delete confirm button stays red and never adopts the brand green [PRJ-2940]', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getItemById).mockResolvedValue({ ok: true, data: makeItem() });
+    vi.mocked(listMovementsForItem).mockResolvedValue({ ok: true, data: { items: [makeMovement()], hasMore: false, lastCursor: null } });
+
+    renderRoute();
+    await waitFor(() => expect(screen.getByText('FAB-001')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Delete item' }));
+    const confirm = screen.getByRole('button', { name: 'Delete' });
+    expect(confirm.className).toContain('bg-red-700');
+    expect(confirm.className).not.toContain('bg-brand');
+    expect(confirm.className).not.toContain('bg-gray-900');
+  });
 });

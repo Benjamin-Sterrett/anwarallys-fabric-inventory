@@ -68,7 +68,7 @@ export default function ReasonChips({
               onClick={() => onChange(r.value)}
               aria-pressed={selected}
               disabled={disabled}
-              className={`${BTN_BASE} ${selected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-800'} px-4 py-2`}
+              className={`${BTN_BASE} ${selected ? 'bg-brand text-white' : 'border border-gray-300 text-gray-800'} px-4 py-2`}
             >
               {r.label}
             </button>
