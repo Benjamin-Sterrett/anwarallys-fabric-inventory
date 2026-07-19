@@ -9,6 +9,7 @@ import RollLabel from '@/components/RollLabel';
 import RecentHistory from '@/components/RecentHistory';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { buildLabelImage, buildDownloadUrl, sanitizeFilename } from '@/lib/labelImage';
+import { downloadLabelPdf } from '@/lib/labelPdf';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
@@ -82,6 +83,8 @@ function ItemPage({ itemId }: { itemId: string }) {
   const [breadcrumbEntries, setBreadcrumbEntries] = useState<BreadcrumbEntry[]>([]);
   const [retryToken, setRetryToken] = useState(0);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingLabel, setDownloadingLabel] = useState(false);
+  const [downloadLabelError, setDownloadLabelError] = useState<string | null>(null);
 
   function handleDownload(item: RollItem) {
     const filename = sanitizeFilename(item.sku, item.itemId) + '.png';
@@ -99,6 +102,16 @@ function ItemPage({ itemId }: { itemId: string }) {
       // Download failed (e.g. canvas encode error). Button re-enables.
     }).finally(() => {
       setDownloading(false);
+    });
+  }
+
+  function handleDownloadLabel(item: RollItem) {
+    setDownloadLabelError(null);
+    setDownloadingLabel(true);
+    void downloadLabelPdf(item.itemId, item.sku, item.description).catch((e) => {
+      setDownloadLabelError(e instanceof Error ? e.message : 'Failed to generate label PDF');
+    }).finally(() => {
+      setDownloadingLabel(false);
     });
   }
 
@@ -276,8 +289,20 @@ function ItemPage({ itemId }: { itemId: string }) {
         >
           {downloading ? 'Downloading…' : 'Download QR'}
         </button>
+        <button
+          type="button"
+          onClick={() => { void handleDownloadLabel(item); }}
+          disabled={downloadingLabel || !buildDownloadUrl(item.itemId)}
+          className={BTN_SECONDARY}
+        >
+          {downloadingLabel ? 'Downloading…' : 'Download label'}
+        </button>
         <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print QR</Link>
       </div>
+
+      {downloadLabelError ? (
+        <p className="mb-3 text-sm text-red-700" role="alert">Label download failed: {downloadLabelError}</p>
+      ) : null}
 
       <RecentHistory itemId={item.itemId} />
     </section>

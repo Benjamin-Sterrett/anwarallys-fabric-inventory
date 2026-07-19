@@ -115,3 +115,59 @@ describe('buildLabelImage', () => {
     );
   });
 });
+
+describe('renderQrPngDataUrl', () => {
+  let origHost: string | undefined;
+
+  beforeEach(() => {
+    origHost = import.meta.env.VITE_PUBLIC_HOST as string | undefined;
+    vi.stubEnv('VITE_PUBLIC_HOST', 'example.com');
+
+    // Stub Image constructor to trigger onload synchronously (happy-dom
+    // does not load images, so the Promise would never resolve otherwise).
+    class MockImage {
+      private _onload: (() => void) | null = null;
+      width = 0;
+      height = 0;
+      set onload(fn: (() => void) | null) { this._onload = fn; }
+      get onload() { return this._onload; }
+      set onerror(_fn: ((reason?: unknown) => void) | null) { /* no-op */ }
+      set src(_url: string) { this._onload?.(); }
+    }
+    vi.stubGlobal('Image', MockImage as unknown as typeof Image);
+
+    // Stub canvas toDataURL
+    const mockCtx = {
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(mockCtx);
+
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,fakeqrcode');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.stubEnv('VITE_PUBLIC_HOST', origHost ?? '');
+  });
+
+  it('returns a PNG data URL', async () => {
+    const { renderQrPngDataUrl } = await import('./labelImage');
+    const dataUrl = await renderQrPngDataUrl('https://example.com/i/test', 240);
+    expect(dataUrl).toMatch(/^data:image\/png/);
+  });
+
+  it('throws when canvas context is not available', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(null);
+    const { renderQrPngDataUrl } = await import('./labelImage');
+    await expect(renderQrPngDataUrl('https://example.com/i/test', 240)).rejects.toThrow(
+      'Could not get 2D context for QR canvas',
+    );
+  });
+});
