@@ -38,6 +38,7 @@ import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import BackButton from '@/components/BackButton';
+import { buildLabelImage, buildDownloadUrl, sanitizeFilename } from '@/lib/labelImage';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
@@ -115,6 +116,7 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
   const navigate = useNavigate();
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   useEffect(() => subscribeToAuthState((u) => setAuthUser(u)), []);
+  const [downloading, setDownloading] = useState(false);
 
   const [item, setItem] = useState<RollItem | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -263,6 +265,25 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
     setHistoryToken((n) => n + 1);
   }, [lastMovement, item, authUser]);
 
+  function handleDownload(item: RollItem) {
+    const filename = sanitizeFilename(item.sku, item.itemId) + '.png';
+    setDownloading(true);
+    void buildLabelImage(item.itemId, item.sku, item.description).then((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }).catch(() => {
+      // Download failed (e.g. canvas encode error). Button re-enables.
+    }).finally(() => {
+      setDownloading(false);
+    });
+  }
+
   if (authUser === undefined || item === undefined) {
     return (
       <section className="mx-auto max-w-2xl px-4 py-8">
@@ -338,6 +359,14 @@ function ItemDetailPage({ itemId }: { itemId: string }) {
       <div className="mb-4 flex flex-wrap gap-2">
         <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}/edit`} className={BTN_SECONDARY}>Edit metadata</Link>
+        <button
+          type="button"
+          onClick={() => { void handleDownload(item); }}
+          disabled={downloading || !buildDownloadUrl(item.itemId)}
+          className={BTN_SECONDARY}
+        >
+          {downloading ? 'Downloading…' : 'Download QR'}
+        </button>
         <button
           type="button"
           onClick={() => navigate(`/print/label/${item.itemId}?size=default`)}

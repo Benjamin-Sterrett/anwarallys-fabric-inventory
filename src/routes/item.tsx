@@ -8,6 +8,7 @@ import LowStockBadge from '@/components/LowStockBadge';
 import RollLabel from '@/components/RollLabel';
 import RecentHistory from '@/components/RecentHistory';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import { buildLabelImage, buildDownloadUrl, sanitizeFilename } from '@/lib/labelImage';
 
 interface BreadcrumbEntry { folderId: string; name: string | null; }
 
@@ -80,6 +81,26 @@ function ItemPage({ itemId }: { itemId: string }) {
   const [loadState, setLoadState] = useState<LoadState>({ kind: 'auth-loading' });
   const [breadcrumbEntries, setBreadcrumbEntries] = useState<BreadcrumbEntry[]>([]);
   const [retryToken, setRetryToken] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+
+  function handleDownload(item: RollItem) {
+    const filename = sanitizeFilename(item.sku, item.itemId) + '.png';
+    setDownloading(true);
+    void buildLabelImage(item.itemId, item.sku, item.description).then((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }).catch(() => {
+      // Download failed (e.g. canvas encode error). Button re-enables.
+    }).finally(() => {
+      setDownloading(false);
+    });
+  }
 
   useEffect(() => {
     if (authUser === undefined || authUser === null) return;
@@ -247,6 +268,14 @@ function ItemPage({ itemId }: { itemId: string }) {
       <div className="mb-4 flex flex-wrap gap-2">
         <Link to={`/items/${item.itemId}/adjust`} className={BTN_PRIMARY}>Adjust stock</Link>
         <Link to={`/items/${item.itemId}`} className={BTN_SECONDARY}>View history</Link>
+        <button
+          type="button"
+          onClick={() => { void handleDownload(item); }}
+          disabled={downloading || !buildDownloadUrl(item.itemId)}
+          className={BTN_SECONDARY}
+        >
+          {downloading ? 'Downloading…' : 'Download QR'}
+        </button>
         <Link to={`/print/label/${item.itemId}`} className={BTN_SECONDARY}>Print QR</Link>
       </div>
 
