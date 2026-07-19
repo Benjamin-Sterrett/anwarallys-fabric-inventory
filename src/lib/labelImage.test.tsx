@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { buildDownloadUrl, sanitizeFilename } from './labelImage';
+import { buildDownloadUrl, sanitizeFilename, serializeQrSvgMarkup } from './labelImage';
 
 describe('buildDownloadUrl', () => {
   const origHost = import.meta.env.VITE_PUBLIC_HOST;
@@ -169,5 +169,35 @@ describe('renderQrPngDataUrl', () => {
     await expect(renderQrPngDataUrl('https://example.com/i/test', 240)).rejects.toThrow(
       'Could not get 2D context for QR canvas',
     );
+  });
+});
+
+describe('serializeQrSvgMarkup (PRJ-2960 regression)', () => {
+  const VALUE = 'https://example.com/i/abc123';
+
+  it('includes the SVG xmlns namespace so the markup decodes as an image', () => {
+    // Root cause of PRJ-2960: a standalone image/svg+xml document with no xmlns
+    // declaration fails to load via <img>, silently breaking every QR/label
+    // download (SVG -> Image -> canvas -> PNG/PDF aborts at the Image load).
+    // The unit Image mock "decodes" any src, so this asserts on the serialized
+    // markup directly — the layer that actually broke in the real browser.
+    expect(serializeQrSvgMarkup(VALUE)).toContain('xmlns="http://www.w3.org/2000/svg"');
+  });
+
+  it('declares the namespace inside the opening <svg> tag', () => {
+    const markup = serializeQrSvgMarkup(VALUE);
+    const openTag = markup.slice(0, markup.indexOf('>') + 1);
+    expect(openTag).toMatch(/^<svg\b/);
+    expect(openTag).toContain('xmlns="http://www.w3.org/2000/svg"');
+  });
+
+  it('produces real QR path data, not an empty shell', () => {
+    expect(serializeQrSvgMarkup(VALUE)).toMatch(/<path\b/);
+  });
+
+  it('injects the namespace exactly once (idempotent)', () => {
+    const markup = serializeQrSvgMarkup(VALUE);
+    const count = (markup.match(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g) || []).length;
+    expect(count).toBe(1);
   });
 });

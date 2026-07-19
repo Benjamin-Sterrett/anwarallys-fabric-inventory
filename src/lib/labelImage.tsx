@@ -48,12 +48,23 @@ export function sanitizeFilename(name: string, fallback: string = 'download'): s
   return safe || fallback;
 }
 
+/** XML namespace a standalone SVG document needs in order to decode as an image. */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 /**
- * Generate the QR code SVG markup synchronously, load it into an
- * Image element, and return the loaded Image.
+ * Render the QR code to SVG markup and guarantee the root `<svg>` carries the
+ * `xmlns` namespace declaration.
+ *
+ * qrcode.react's `QRCodeSVG` does NOT emit an `xmlns` attribute. When the markup
+ * is wrapped in a `Blob({type:'image/svg+xml'})` and loaded via `new Image()`, a
+ * browser refuses to decode a namespace-less standalone SVG document: the image
+ * fires `onerror`, the QR -> canvas -> PNG/PDF pipeline aborts, and the label /
+ * QR download silently produces nothing (PRJ-2960). Injecting the namespace makes
+ * the document decodable. jsdom/happy-dom never actually decode SVG images, so
+ * this defect is invisible to the Image mocks — hence the dedicated markup test.
  */
-function renderQRImage(value: string): Promise<HTMLImageElement> {
-  const svgMarkup = renderToStaticMarkup(
+export function serializeQrSvgMarkup(value: string): string {
+  const raw = renderToStaticMarkup(
     <QRCodeSVG
       value={value}
       level="Q"
@@ -62,6 +73,17 @@ function renderQRImage(value: string): Promise<HTMLImageElement> {
       fgColor="#000000"
     />,
   );
+  // Idempotent: if a future qrcode.react version emits its own xmlns, keep it.
+  if (/<svg[^>]*\sxmlns=/i.test(raw)) return raw;
+  return raw.replace(/<svg\b/, `<svg xmlns="${SVG_NS}"`);
+}
+
+/**
+ * Generate the QR code SVG markup synchronously, load it into an
+ * Image element, and return the loaded Image.
+ */
+function renderQRImage(value: string): Promise<HTMLImageElement> {
+  const svgMarkup = serializeQrSvgMarkup(value);
 
   return new Promise((resolve, reject) => {
     const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
@@ -93,15 +115,7 @@ function renderQRImage(value: string): Promise<HTMLImageElement> {
  * @returns A data URL string (data:image/png;base64,...).
  */
 export async function renderQrPngDataUrl(url: string, sizePx: number): Promise<string> {
-  const svgMarkup = renderToStaticMarkup(
-    <QRCodeSVG
-      value={url}
-      level="Q"
-      marginSize={4}
-      bgColor="#FFFFFF"
-      fgColor="#000000"
-    />,
-  );
+  const svgMarkup = serializeQrSvgMarkup(url);
 
   const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
   const svgUrl = URL.createObjectURL(svgBlob);
